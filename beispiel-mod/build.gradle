@@ -1,0 +1,130 @@
+plugins {
+	id 'fabric-loom' version '1.4.5'
+	id 'ploceus' version '1.4.2'
+	id 'maven-publish'
+}
+
+sourceCompatibility = JavaVersion.VERSION_1_8
+targetCompatibility = JavaVersion.VERSION_1_8
+
+group = project.mod_id // http://maven.apache.org/guides/mini/guide-naming-conventions.html
+version = project.mod_version
+
+if (version.endsWith('-dev')) {
+	version = version + "." + new Date().format('yyyyMMdd.HHmmss')
+}
+
+base {
+	archivesName = project.mod_file_name + '-' + project.minecraft_version_out
+}
+
+repositories {
+	// Add repositories to retrieve artifacts from in here.
+	// You should only use this when depending on other mods because
+	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
+	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
+	// for more information about repositories.
+	// maven { url 'https://maven.terraformersmc.com/releases/' }
+
+	maven { url 'https://masa.dy.fi/maven' }
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+
+	mappings loom.layered {
+		addLayer ploceus.mcpMappings('stable', '1.12', '39')
+		//mappings "net.ornithemc:feather:${project.minecraft_version}+build.${project.feather_build}:v2"
+		//addLayer ploceus.nestedMappings() // remove this line if not using nests
+	}
+	//nests "net.ornithemc:nests:${project.minecraft_version}+build.${project.nests_build}" // remove this line if not using nests
+
+	modImplementation "net.fabricmc:fabric-loader:${project.fabric_loader_version}"
+	modImplementation "com.terraformersmc:modmenu:${project.mod_menu_version}"
+	implementation "com.google.code.findbugs:jsr305:3.0.2"
+
+	//ploceus.addCommonLibraries()
+	ploceus.dependOsl(project.osl_version)
+
+	modImplementation "malilib:malilib-ornithe-${project.minecraft_version_out}:${project.malilib_version}"
+}
+
+loom {
+	decompilers {
+		vineflower {
+			options.put("ind", "    ")
+			//preferences {
+			//  ind = ' '
+			//}
+		}
+	}
+}
+
+processResources {
+	// Exclude the GIMP image files
+	exclude '**/*.xcf'
+	exclude '**/xcf'
+
+	// this will ensure that this task is redone when the versions change.
+	//inputs.property "minecraft_version", project.config.minecraft_version
+
+	inputs.property "mod_version", version
+
+	filesMatching("fabric.mod.json") {
+		expand "mod_version": version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	// ensure that the encoding is set to UTF-8, no matter what the system default is
+	// this fixes some edge cases with special characters not displaying correctly
+	// see http://yodaconditions.net/blog/fix-for-java-file-encoding-problems-with-gradle.html
+	// If Javadoc is generated, this must be specified in that task too.
+	it.options.encoding = "UTF-8"
+
+	it.options.release = 8
+}
+
+java {
+	// Still required by IDEs such as Eclipse and Visual Studio Code
+	sourceCompatibility = JavaVersion.VERSION_1_8
+	targetCompatibility = JavaVersion.VERSION_1_8
+
+	// Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task if it is present.
+	// If you remove this line, sources will not be generated.
+	withSourcesJar()
+
+	// If this mod is going to be a library, then it should also generate Javadocs in order to aid with development.
+	// Uncomment this line to generate them.
+	// withJavadocJar()
+}
+
+// If you plan to use a different file for the license, don't forget to change the file name here!
+/*
+jar {
+	from('LICENSE') {
+		rename { "${it}_${base.archivesName.get()}" }
+	}
+}
+*/
+
+// Configure the maven publication
+tasks.publish.dependsOn build
+
+publishing {
+	publications {
+		mavenJava(MavenPublication) {
+			artifactId project.archivesBaseName
+
+			// add all the jars that should be included when publishing to maven
+			//artifact(jar) { builtBy remapJar }
+			from components.java
+		}
+	}
+
+	repositories {
+		maven {
+			url "$projectDir/../../CommonMaven"
+		}
+	}
+}

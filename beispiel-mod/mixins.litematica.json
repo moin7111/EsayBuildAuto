@@ -1,0 +1,31 @@
+{
+	"required": true,
+	"package": "litematica.mixin",
+	"compatibilityLevel": "JAVA_8",
+	"minVersion": "0.8",
+	"client": [
+		"IMixinBlockRendererDispatcher",
+		"IMixinCompiledChunk",
+		"IMixinDataFixer",
+		"IMixinItemBlockSpecial",
+		"IMixinViewFrustum",
+		"IMixinWorldClient",
+		"MixinBlock",
+		"MixinBlockRail",
+		"MixinChunk",
+		"MixinChunkProviderClient",
+		"MixinEntityRenderer",
+		"MixinGuiContainer",
+		"MixinGuiEditSign",
+		"MixinIntegratedServer",
+		"MixinMinecraft",
+		"MixinNetHandlerPlayClient",
+		"MixinPlayerControllerMP",
+		"MixinRenderGlobal",
+		"MixinWorld",
+		"debug.GuiOverlayDebugMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

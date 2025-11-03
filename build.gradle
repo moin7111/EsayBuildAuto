@@ -10,6 +10,10 @@ group = mod_group_id
 
 repositories {
     mavenLocal()
+    mavenCentral()
+    maven {
+        url 'https://maven.neoforged.net/releases'
+    }
 }
 
 base {

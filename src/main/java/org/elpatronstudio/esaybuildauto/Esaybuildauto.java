@@ -21,6 +21,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
@@ -68,10 +69,14 @@ public class Esaybuildauto {
     public Esaybuildauto(IEventBus modEventBus, ModContainer modContainer) {
         // Register the commonSetup method for modloading
         modEventBus.addListener(this::commonSetup);
-        modEventBus.addListener(this::onClientSetup);
         modEventBus.addListener(EasyBuildNetwork::onRegisterPayloadHandlers);
-        modEventBus.addListener(EasyBuildNetwork::onRegisterClientPayloadHandlers);
         modEventBus.addListener(Config::onLoad);
+
+        if (FMLEnvironment.getDist().isClient()) {
+            modEventBus.addListener(this::onClientSetup);
+            modEventBus.addListener(EasyBuildNetwork::onRegisterClientPayloadHandlers);
+            EasyBuildClient.init(modEventBus);
+        }
 
         // Register the Deferred Register to the mod event bus so blocks get registered
         BLOCKS.register(modEventBus);
@@ -89,22 +94,20 @@ public class Esaybuildauto {
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
 
-        EasyBuildClient.init(modEventBus);
-
         // Register our mod's ModConfigSpec so that FML can create and load the config file for us
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
     }
 
-      private void commonSetup(final FMLCommonSetupEvent event) {
-          // Some common setup code
-          LOGGER.info("HELLO FROM COMMON SETUP");
+    private void commonSetup(final FMLCommonSetupEvent event) {
+        // Some common setup code
+        LOGGER.info("HELLO FROM COMMON SETUP");
 
-          if (Config.logDirtBlock) LOGGER.info("DIRT BLOCK >> {}", BuiltInRegistries.BLOCK.getKey(Blocks.DIRT));
+        if (Config.logDirtBlock) LOGGER.info("DIRT BLOCK >> {}", BuiltInRegistries.BLOCK.getKey(Blocks.DIRT));
 
-          LOGGER.info(Config.magicNumberIntroduction + Config.magicNumber);
+        LOGGER.info(Config.magicNumberIntroduction + Config.magicNumber);
 
-          Config.items.forEach((item) -> LOGGER.info("ITEM >> {}", item.toString()));
-      }
+        Config.items.forEach((item) -> LOGGER.info("ITEM >> {}", item.toString()));
+    }
 
     // Add the example block item to the building blocks tab
     private void addCreative(BuildCreativeModeTabContentsEvent event) {
@@ -120,6 +123,11 @@ public class Esaybuildauto {
 
     private void onClientSetup(final FMLClientSetupEvent event) {
         LOGGER.info("HELLO FROM CLIENT SETUP");
-        LOGGER.info("MINECRAFT NAME >> {}", Minecraft.getInstance().getUser().getName());
+        event.enqueueWork(() -> {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft != null && minecraft.getUser() != null) {
+                LOGGER.info("MINECRAFT NAME >> {}", minecraft.getUser().getName());
+            }
+        });
     }
 }

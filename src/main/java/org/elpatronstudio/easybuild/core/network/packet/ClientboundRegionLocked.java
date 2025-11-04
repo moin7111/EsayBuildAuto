@@ -5,6 +5,7 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
@@ -66,6 +67,14 @@ public record ClientboundRegionLocked(
 
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
-        // TODO: inform client about region lock state (e.g., toast or HUD banner).
+        if (minecraft.player == null) {
+            return;
+        }
+
+        String ownerLabel = ownerName().isBlank() ? ownerUuid().toString() : ownerName();
+        long etaTicks = etaTicks();
+        String etaText = etaTicks <= 0 ? "unbekannt" : etaTicks + " Ticks";
+
+        minecraft.player.displayClientMessage(Component.literal("[EasyBuild] Region gesperrt durch " + ownerLabel + " – voraussichtlich " + etaText + "."), true);
     }
 }

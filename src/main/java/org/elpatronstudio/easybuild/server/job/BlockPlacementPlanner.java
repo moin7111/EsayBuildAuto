@@ -76,7 +76,9 @@ public final class BlockPlacementPlanner {
                 .thenComparingInt(placement -> placement.position().getX())
                 .thenComparingInt(placement -> placement.position().getZ()));
 
-        return new BlockPlacementPlan(placements);
+        BlockRegion region = BlockRegion.fromPlacements(placements, anchorPos);
+
+        return new BlockPlacementPlan(placements, region);
     }
 
     private static StructureTemplate resolveTemplate(ServerLevel level, SchematicRef ref) throws BlockPlacementException {

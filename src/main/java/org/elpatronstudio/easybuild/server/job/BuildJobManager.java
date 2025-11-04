@@ -14,6 +14,7 @@ import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildAccepted
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildCompleted;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildFailed;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundProgressUpdate;
+import org.elpatronstudio.easybuild.core.network.packet.ClientboundRegionLocked;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundAcknowledgeStatus;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundRequestBuild;
 import org.elpatronstudio.easybuild.server.ServerHandshakeService;
@@ -120,15 +121,57 @@ public final class BuildJobManager {
             return;
         }
 
+        ResourceKey<Level> dimensionKey = BlockPlacementPlanner.resolveDimensionKey(job.anchor());
+        long estimatedTicks = estimateDurationTicks(job, plan);
+        RegionLockManager.LockResult lockResult = RegionLockManager.get().tryAcquire(
+                dimensionKey,
+                plan.region(),
+                player.getUUID(),
+                player.getGameProfile().name(),
+                job.jobId(),
+                estimatedTicks
+        );
+
+        if (!lockResult.success()) {
+            RegionLockManager.RegionLock conflict = lockResult.conflict();
+            String lockDetails = "Region wird aktuell von einem anderen Job genutzt.";
+            if (conflict != null) {
+                long etaTicks = estimateRemainingTicks(conflict);
+                EasyBuildPacketSender.sendTo(player, new ClientboundRegionLocked(
+                        job.schematic(),
+                        conflict.jobId(),
+                        conflict.ownerUuid(),
+                        conflict.ownerName(),
+                        etaTicks,
+                        ThreadLocalRandom.current().nextLong(),
+                        System.currentTimeMillis()
+                ));
+                sendChat(player, Component.literal("[EasyBuild] Region durch Job " + conflict.jobId() + " gesperrt (" + conflict.ownerName() + ")."));
+                lockDetails = "Region ist durch Job " + conflict.jobId() + " gesperrt.";
+            }
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    job.jobId(),
+                    "REGION_LOCKED",
+                    lockDetails,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    System.currentTimeMillis()
+            ));
+            LOGGER.debug("Rejected job {} due to region lock conflict.", job.jobId());
+            return;
+        }
+
+        RegionLockManager.RegionLock regionLock = lockResult.acquired();
+
         BuildJobState state = new BuildJobState(job, UUID.randomUUID());
         state.attachPlan(plan);
         state.updateProgress(0, plan.totalBlocks(), JobPhase.QUEUED);
+        state.attachRegionLock(regionLock);
 
         jobs.put(jobId, state);
         playerJobs.computeIfAbsent(player.getUUID(), uuid -> ConcurrentHashMap.newKeySet()).add(jobId);
         jobQueue.add(state);
 
-        long estimatedTicks = estimateDurationTicks(job, plan);
         long now = System.currentTimeMillis();
         EasyBuildPacketSender.sendTo(player, new ClientboundBuildAccepted(
                 job.jobId(),
@@ -222,6 +265,8 @@ public final class BuildJobManager {
         if (currentJob != null && currentJob.state == state) {
             currentJob = null;
         }
+        RegionLockManager.get().release(state.regionLock());
+        state.attachRegionLock(null);
         Set<String> owned = playerJobs.get(state.job().ownerUuid());
         if (owned != null) {
             owned.remove(state.job().jobId());
@@ -393,6 +438,19 @@ public final class BuildJobManager {
                 System.currentTimeMillis()
         ));
         sendChatToOwner(level, state, Component.literal("[EasyBuild] Job " + state.job().jobId() + " fehlgeschlagen: " + safeDetails));
+    }
+
+    private long estimateRemainingTicks(RegionLockManager.RegionLock lock) {
+        if (lock == null) {
+            return 0L;
+        }
+        long elapsedMs = System.currentTimeMillis() - lock.lockedAt();
+        long elapsedTicks = Math.max(0L, elapsedMs / 50L);
+        long remaining = lock.estimatedTicks() - elapsedTicks;
+        if (remaining == Long.MIN_VALUE || remaining == Long.MAX_VALUE) {
+            return lock.estimatedTicks();
+        }
+        return Math.max(1L, remaining);
     }
 
     private void sendChatToOwner(ServerLevel level, BuildJobState state, Component message) {

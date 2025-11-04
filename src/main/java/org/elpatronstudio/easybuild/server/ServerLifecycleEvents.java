@@ -1,7 +1,9 @@
 package org.elpatronstudio.easybuild.server;
 
+import net.minecraft.gametest.framework.GameTestServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
@@ -19,6 +21,19 @@ public final class ServerLifecycleEvents {
     public static void register() {
         NeoForge.EVENT_BUS.addListener(ServerLifecycleEvents::onPlayerLogout);
         NeoForge.EVENT_BUS.addListener(ServerLifecycleEvents::onLevelTick);
+        NeoForge.EVENT_BUS.addListener(ServerLifecycleEvents::onPlayerLogin);
+    }
+
+    private static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer serverPlayer)) {
+            return;
+        }
+
+        if (!(serverPlayer.level().getServer() instanceof GameTestServer)) {
+            return;
+        }
+
+        serverPlayer.setGameMode(GameType.CREATIVE);
     }
 
     private static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {

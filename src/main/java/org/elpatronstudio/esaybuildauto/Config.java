@@ -45,6 +45,14 @@ public class Config {
             .comment("Maximum constructions attempts per client tick when auto building.")
             .defineInRange("client.blocksPerTick", 1, 1, 8);
 
+    private static final ModConfigSpec.IntValue CLIENT_CHEST_SEARCH_RADIUS = BUILDER
+            .comment("Radius in blocks around the player to look for linked containers when auto building on the client.")
+            .defineInRange("client.chestSearchRadius", 6, 1, 16);
+
+    private static final ModConfigSpec.IntValue CLIENT_CHEST_MAX_TARGETS = BUILDER
+            .comment("Maximum number of nearby containers to register for client auto building.")
+            .defineInRange("client.chestMaxTargets", 8, 0, 32);
+
     static final ModConfigSpec SPEC = BUILDER.build();
 
     public static boolean logDirtBlock;
@@ -56,6 +64,8 @@ public class Config {
     public static PasteMode clientDefaultPasteMode;
     public static boolean clientPlaceAir;
     public static int clientBlocksPerTick;
+    public static int clientChestSearchRadius;
+    public static int clientChestMaxTargets;
 
     private static boolean validateItemName(final Object obj) {
         return obj instanceof String itemName && BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(itemName));
@@ -74,5 +84,7 @@ public class Config {
         clientDefaultPasteMode = CLIENT_AUTOBUILD_MODE.get();
         clientPlaceAir = CLIENT_AUTOBUILD_PLACE_AIR.get();
         clientBlocksPerTick = CLIENT_AUTOBUILD_BLOCKS_PER_TICK.get();
+        clientChestSearchRadius = CLIENT_CHEST_SEARCH_RADIUS.get();
+        clientChestMaxTargets = CLIENT_CHEST_MAX_TARGETS.get();
     }
 }

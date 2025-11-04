@@ -1,9 +1,11 @@
 package org.elpatronstudio.easybuild.client;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -18,6 +20,8 @@ import org.elpatronstudio.easybuild.server.job.BlockPlacementException;
 import org.elpatronstudio.esaybuildauto.Config;
 import org.elpatronstudio.esaybuildauto.Esaybuildauto;
 import org.lwjgl.glfw.GLFW;
+import net.minecraft.world.Container;
+import net.minecraft.world.level.block.entity.BlockEntity;
 
 /**
  * Client bootstrap hooks for EasyBuild features such as auto-build key handling.
@@ -77,6 +81,37 @@ public final class EasyBuildClient {
         );
         JsonObject options = new JsonObject();
         options.addProperty("placeAir", Config.clientPlaceAir);
+
+        int radius = Math.max(0, Math.min(16, Config.clientChestSearchRadius));
+        int maxTargets = Math.max(0, Config.clientChestMaxTargets);
+        if (radius > 0 && maxTargets > 0) {
+            JsonArray chests = new JsonArray();
+            int added = 0;
+            BlockPos origin = player.blockPosition();
+            for (int dx = -radius; dx <= radius && added < maxTargets; dx++) {
+                for (int dy = -radius; dy <= radius && added < maxTargets; dy++) {
+                    for (int dz = -radius; dz <= radius && added < maxTargets; dz++) {
+                        BlockPos candidate = origin.offset(dx, dy, dz);
+                        BlockEntity blockEntity = player.level().getBlockEntity(candidate);
+                        if (blockEntity instanceof Container) {
+                            JsonObject chestObj = new JsonObject();
+                            chestObj.addProperty("dimension", player.level().dimension().location().toString());
+                            chestObj.addProperty("x", candidate.getX());
+                            chestObj.addProperty("y", candidate.getY());
+                            chestObj.addProperty("z", candidate.getZ());
+                            chests.add(chestObj);
+                            added++;
+                            if (added >= maxTargets) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (chests.size() > 0) {
+                options.add("chests", chests);
+            }
+        }
 
         try {
             controller.start(schematic, anchor, Config.clientDefaultPasteMode, options);

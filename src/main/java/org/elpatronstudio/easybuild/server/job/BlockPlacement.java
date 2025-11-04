@@ -7,5 +7,5 @@ import net.minecraft.world.level.block.state.BlockState;
 /**
  * Represents a single block placement operation in world space, including optional block entity data.
  */
-record BlockPlacement(BlockPos position, BlockState state, CompoundTag blockEntityTag) {
+public record BlockPlacement(BlockPos position, BlockState state, CompoundTag blockEntityTag) {
 }

@@ -28,7 +28,7 @@ import java.util.Optional;
 /**
  * Creates block placement plans from schematic references.
  */
-final class BlockPlacementPlanner {
+public final class BlockPlacementPlanner {
 
     private BlockPlacementPlanner() {
     }
@@ -52,7 +52,7 @@ final class BlockPlacementPlanner {
                 .setIgnoreEntities(false);
 
         List<BlockPlacement> placements = new ArrayList<>();
-        List<StructureTemplate.StructureBlockInfo> rawBlocks = getPrimaryPalette(template);
+        List<StructureTemplate.StructureBlockInfo> rawBlocks = extractPrimaryPalette(template);
         List<StructureTemplate.StructureBlockInfo> processed = StructureTemplate.processBlockInfos(level, anchorPos, anchorPos, settings, rawBlocks, template);
         for (StructureTemplate.StructureBlockInfo info : processed) {
             BlockState state = info.state().mirror(mirror).rotate(rotation);
@@ -91,7 +91,7 @@ final class BlockPlacementPlanner {
         return manager.getOrCreate(structureId);
     }
 
-    private static ResourceLocation resolveStructureLocation(SchematicRef ref) throws BlockPlacementException {
+    public static ResourceLocation resolveStructureLocation(SchematicRef ref) throws BlockPlacementException {
         String rawId = ref.schematicId();
         if (rawId == null || rawId.isBlank()) {
             throw new BlockPlacementException("SCHEMATIC_ID_MISSING", "Die Schematic-ID fehlt");
@@ -125,7 +125,7 @@ final class BlockPlacementPlanner {
     }
 
     @SuppressWarnings("unchecked")
-    private static List<StructureTemplate.StructureBlockInfo> getPrimaryPalette(StructureTemplate template) throws BlockPlacementException {
+    public static List<StructureTemplate.StructureBlockInfo> extractPrimaryPalette(StructureTemplate template) throws BlockPlacementException {
         List<StructureTemplate.Palette> palettes = (List<StructureTemplate.Palette>) getPalettes(template);
         if (palettes.isEmpty()) {
             return List.of();

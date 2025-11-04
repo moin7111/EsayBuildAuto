@@ -5,23 +5,23 @@ import java.util.List;
 /**
  * Immutable plan containing all block placements for a build job.
  */
-final class BlockPlacementPlan {
+public final class BlockPlacementPlan {
 
     private final List<BlockPlacement> placements;
 
-    BlockPlacementPlan(List<BlockPlacement> placements) {
+    public BlockPlacementPlan(List<BlockPlacement> placements) {
         this.placements = List.copyOf(placements);
     }
 
-    List<BlockPlacement> placements() {
+    public List<BlockPlacement> placements() {
         return placements;
     }
 
-    int totalBlocks() {
+    public int totalBlocks() {
         return placements.size();
     }
 
-    boolean isEmpty() {
+    public boolean isEmpty() {
         return placements.isEmpty();
     }
 }

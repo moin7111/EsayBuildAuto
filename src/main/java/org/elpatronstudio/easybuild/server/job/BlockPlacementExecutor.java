@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * Executes a {@link BlockPlacementPlan} over multiple server ticks.
  */
-final class BlockPlacementExecutor {
+public final class BlockPlacementExecutor {
 
     private final ServerLevel level;
     private final List<BlockPlacement> placements;
@@ -19,7 +19,7 @@ final class BlockPlacementExecutor {
 
     private int cursor;
 
-    BlockPlacementExecutor(ServerLevel level, BlockPlacementPlan plan, PasteMode mode, int blocksPerTick) {
+    public BlockPlacementExecutor(ServerLevel level, BlockPlacementPlan plan, PasteMode mode, int blocksPerTick) {
         this.level = level;
         this.placements = plan.placements();
         this.mode = mode;
@@ -27,15 +27,15 @@ final class BlockPlacementExecutor {
         this.cursor = 0;
     }
 
-    int totalBlocks() {
+    public int totalBlocks() {
         return placements.size();
     }
 
-    int placedBlocks() {
+    public int placedBlocks() {
         return cursor;
     }
 
-    boolean tick() throws BlockPlacementException {
+    public boolean tick() throws BlockPlacementException {
         if (placements.isEmpty()) {
             return true;
         }

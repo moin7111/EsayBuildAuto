@@ -2,11 +2,9 @@ package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Supplier;
 
 /**
  * Server → Client acknowledgement of the EasyBuild handshake.
@@ -48,12 +46,8 @@ public record ClientboundHelloAcknowledge(
         return new ClientboundHelloAcknowledge(protocolVersion, serverVersion, serverCapabilities, configHash, nonce, serverTime);
     }
 
-    public static void handle(ClientboundHelloAcknowledge message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            // TODO: store server capabilities and notify client controllers of connected state.
-        });
-        context.setPacketHandled(true);
+    public void handleClient() {
+        Minecraft minecraft = Minecraft.getInstance();
+        // TODO: store server capabilities and notify client controllers of connected state.
     }
 }

@@ -29,6 +29,7 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
+import org.elpatronstudio.easybuild.server.ServerLifecycleEvents;
 import org.slf4j.Logger;
 
 import java.util.function.UnaryOperator;
@@ -80,6 +81,7 @@ public class Esaybuildauto {
         // Note that this is necessary if and only if we want *this* class (Esaybuildauto) to respond directly to events.
         // Do not add this line if there are no @SubscribeEvent-annotated functions in this class, like onServerStarting() below.
         NeoForge.EVENT_BUS.register(this);
+        ServerLifecycleEvents.register();
 
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);

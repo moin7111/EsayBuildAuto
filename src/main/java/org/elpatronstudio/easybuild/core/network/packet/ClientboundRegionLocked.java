@@ -2,12 +2,10 @@ package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
 
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Server → Client message informing that a region is currently locked by another job.
@@ -52,12 +50,8 @@ public record ClientboundRegionLocked(
         return new ClientboundRegionLocked(schematic, jobId, ownerUuid, ownerName, etaTicks, nonce, serverTime);
     }
 
-    public static void handle(ClientboundRegionLocked message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            // TODO: inform client about region lock state (e.g., toast or HUD banner).
-        });
-        context.setPacketHandled(true);
+    public void handleClient() {
+        Minecraft minecraft = Minecraft.getInstance();
+        // TODO: inform client about region lock state (e.g., toast or HUD banner).
     }
 }

@@ -2,9 +2,9 @@ EasyBuild Dual-Architecture – Netzwerkprotokoll
 ==============================================
 
 ## 1. Überblick
-- **Ziel**: Gemeinsames SimpleChannel-Protokoll für Client ↔ Server in NeoForge.
+- **Ziel**: Gemeinsames Mod-Nachrichtenprotokoll für Client ↔ Server in NeoForge.
 - **Versionierung**: Kanal-ID `easybuild:core` mit Protokollversion `1` (String).
-- **Transport**: Registrierte Packet-Typen via `SimpleChannel#messageBuilder`.
+- **Transport**: Konzeptuell wie früher über `SimpleChannel`; Implementierung erfolgt in NeoForge 21 via Payload-Registrierung (`NetworkRegistry.register`), sobald Phase A abgeschlossen wird.
 - **Signierung**: Jedes Packet trägt `playerUuid`, `nonce` und `serverTime` (Server validiert Zeitfenster < ±5 s).
 
 ## 2. Lifecycle & States

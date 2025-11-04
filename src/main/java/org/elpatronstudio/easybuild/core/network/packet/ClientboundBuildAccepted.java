@@ -2,12 +2,10 @@ package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
 import org.elpatronstudio.easybuild.core.model.PasteMode;
 
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Server → Client message acknowledging that a build job has been accepted and queued.
@@ -46,12 +44,8 @@ public record ClientboundBuildAccepted(
         return new ClientboundBuildAccepted(jobId, mode, estimate, token, nonce, serverTime);
     }
 
-    public static void handle(ClientboundBuildAccepted message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            // TODO: update client job tracker with new job entry.
-        });
-        context.setPacketHandled(true);
+    public void handleClient() {
+        Minecraft minecraft = Minecraft.getInstance();
+        // TODO: update client job tracker with new job entry.
     }
 }

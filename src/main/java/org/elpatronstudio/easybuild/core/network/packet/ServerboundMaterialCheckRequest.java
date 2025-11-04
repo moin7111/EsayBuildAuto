@@ -1,7 +1,7 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
+import net.minecraft.server.level.ServerPlayer;
 import org.elpatronstudio.easybuild.core.model.AnchorPos;
 import org.elpatronstudio.easybuild.core.model.ChestRef;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
@@ -10,7 +10,6 @@ import org.elpatronstudio.easybuild.core.model.SchematicRef;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Client → Server packet to validate materials for a schematic.
@@ -51,11 +50,7 @@ public record ServerboundMaterialCheckRequest(
         return new ServerboundMaterialCheckRequest(playerUuid, schematic, anchor, chests, estimate, nonce);
     }
 
-    public static void handle(ServerboundMaterialCheckRequest message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            // TODO: implement server-side material validation pipeline.
-        });
-        context.setPacketHandled(true);
+    public void handle(ServerPlayer player) {
+        // TODO: implement server-side material validation pipeline once the networking layer is wired up.
     }
 }

@@ -1,12 +1,12 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
+import net.minecraft.server.level.ServerPlayer;
 import org.elpatronstudio.easybuild.core.model.AcknowledgeStatusCode;
+import org.elpatronstudio.easybuild.server.job.BuildJobManager;
 
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Client → Server acknowledgement of a received status update.
@@ -39,11 +39,7 @@ public record ServerboundAcknowledgeStatus(
         return new ServerboundAcknowledgeStatus(playerUuid, jobId, statusCode, nonce);
     }
 
-    public static void handle(ServerboundAcknowledgeStatus message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            // TODO: update acknowledgement state on server job tracking.
-        });
-        context.setPacketHandled(true);
+    public void handle(ServerPlayer player) {
+        BuildJobManager.get().acknowledgeStatus(player, this);
     }
 }

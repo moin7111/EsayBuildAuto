@@ -1,13 +1,13 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
+import net.minecraft.server.level.ServerPlayer;
+import org.elpatronstudio.easybuild.server.ServerHandshakeService;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Client → Server handshake message sent once when joining a modded server.
@@ -44,11 +44,7 @@ public record ServerboundHelloHandshake(
         return new ServerboundHelloHandshake(uuid, clientVersion, protocolVersion, capabilities, nonce);
     }
 
-    public static void handle(ServerboundHelloHandshake message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            // TODO: validate handshake and respond with server capabilities.
-        });
-        context.setPacketHandled(true);
+    public void handle(ServerPlayer player) {
+        ServerHandshakeService.handleHello(player, this);
     }
 }

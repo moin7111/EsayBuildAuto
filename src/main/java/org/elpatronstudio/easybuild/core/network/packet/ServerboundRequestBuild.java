@@ -5,14 +5,14 @@ import com.google.gson.JsonParser;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
+import net.minecraft.server.level.ServerPlayer;
 import org.elpatronstudio.easybuild.core.model.AnchorPos;
 import org.elpatronstudio.easybuild.core.model.PasteMode;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
+import org.elpatronstudio.easybuild.server.job.BuildJobManager;
 
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Client → Server packet requesting the server to execute a build job.
@@ -61,11 +61,7 @@ public record ServerboundRequestBuild(
         return new ServerboundRequestBuild(playerUuid, schematic, anchor, mode, options, requestId, nonce);
     }
 
-    public static void handle(ServerboundRequestBuild message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            // TODO: schedule server-side build request execution.
-        });
-        context.setPacketHandled(true);
+    public void handle(ServerPlayer player) {
+        BuildJobManager.get().submitBuild(player, this);
     }
 }

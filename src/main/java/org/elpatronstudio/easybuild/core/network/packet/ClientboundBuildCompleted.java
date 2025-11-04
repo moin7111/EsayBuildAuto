@@ -2,12 +2,10 @@ package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Supplier;
 
 /**
  * Server → Client message that signals the completion of a build job.
@@ -48,12 +46,8 @@ public record ClientboundBuildCompleted(
         return new ClientboundBuildCompleted(jobId, success, consumed, logRef, nonce, serverTime);
     }
 
-    public static void handle(ClientboundBuildCompleted message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            // TODO: notify client UI of job completion and update logs/materials view.
-        });
-        context.setPacketHandled(true);
+    public void handleClient() {
+        Minecraft minecraft = Minecraft.getInstance();
+        // TODO: notify client UI of job completion and update logs/materials view.
     }
 }

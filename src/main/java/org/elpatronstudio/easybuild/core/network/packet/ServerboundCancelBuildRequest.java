@@ -1,11 +1,11 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
+import net.minecraft.server.level.ServerPlayer;
+import org.elpatronstudio.easybuild.server.job.BuildJobManager;
 
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Client → Server packet requesting cancellation of a running build job.
@@ -34,11 +34,7 @@ public record ServerboundCancelBuildRequest(
         return new ServerboundCancelBuildRequest(playerUuid, jobId, nonce);
     }
 
-    public static void handle(ServerboundCancelBuildRequest message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            // TODO: cancel the referenced job on the server-side job queue.
-        });
-        context.setPacketHandled(true);
+    public void handle(ServerPlayer player) {
+        BuildJobManager.get().cancelJob(player, jobId);
     }
 }

@@ -2,13 +2,11 @@ package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
-import net.neoforged.neoforge.network.NetworkEvent;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Supplier;
 
 /**
  * Server → Client response containing material availability results.
@@ -49,12 +47,8 @@ public record ClientboundMaterialCheckResponse(
         return new ClientboundMaterialCheckResponse(schematic, ok, missing, reserved, reservationExpiresAt, nonce, serverTime);
     }
 
-    public static void handle(ClientboundMaterialCheckResponse message, Supplier<NetworkEvent.Context> contextSupplier) {
-        NetworkEvent.Context context = contextSupplier.get();
-        context.enqueueWork(() -> {
-            Minecraft minecraft = Minecraft.getInstance();
-            // TODO: route response to client controller / UI state.
-        });
-        context.setPacketHandled(true);
+    public void handleClient() {
+        Minecraft minecraft = Minecraft.getInstance();
+        // TODO: route response to client controller / UI state.
     }
 }

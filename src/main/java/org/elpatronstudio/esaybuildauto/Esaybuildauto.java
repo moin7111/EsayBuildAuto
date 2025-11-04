@@ -28,6 +28,7 @@ import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
+import org.elpatronstudio.easybuild.client.EasyBuildClient;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 import org.elpatronstudio.easybuild.server.ServerLifecycleEvents;
 import org.slf4j.Logger;
@@ -87,6 +88,8 @@ public class Esaybuildauto {
 
         // Register the item to a creative tab
         modEventBus.addListener(this::addCreative);
+
+        EasyBuildClient.init(modEventBus);
 
         // Register our mod's ModConfigSpec so that FML can create and load the config file for us
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);

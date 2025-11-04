@@ -16,6 +16,7 @@ public final class BuildJobState {
     private final AtomicInteger placed = new AtomicInteger();
     private final AtomicInteger total = new AtomicInteger();
     private volatile JobPhase phase = JobPhase.QUEUED;
+    private volatile BlockPlacementPlan plan;
 
     public BuildJobState(BuildJob job, UUID reservationToken) {
         this.job = Objects.requireNonNull(job, "job");
@@ -42,6 +43,10 @@ public final class BuildJobState {
         return total.get();
     }
 
+    public BlockPlacementPlan plan() {
+        return plan;
+    }
+
     public void updateProgress(int placed, int total, JobPhase phase) {
         this.placed.set(Math.max(0, placed));
         this.total.set(Math.max(0, total));
@@ -50,5 +55,9 @@ public final class BuildJobState {
 
     public void setPhase(JobPhase phase) {
         this.phase = Objects.requireNonNull(phase, "phase");
+    }
+
+    public void attachPlan(BlockPlacementPlan plan) {
+        this.plan = plan;
     }
 }

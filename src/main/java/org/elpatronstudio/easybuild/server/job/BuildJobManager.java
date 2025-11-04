@@ -1,11 +1,14 @@
 package org.elpatronstudio.easybuild.server.job;
 
+import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import org.elpatronstudio.easybuild.core.model.JobPhase;
+import org.elpatronstudio.easybuild.core.model.PasteMode;
 import org.elpatronstudio.easybuild.core.network.EasyBuildPacketSender;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildAccepted;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildCompleted;
@@ -32,9 +35,6 @@ public final class BuildJobManager {
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final BuildJobManager INSTANCE = new BuildJobManager();
-
-    private static final int SIMULATED_TOTAL_BLOCKS = 1200;
-    private static final int TICKS_PER_JOB = 40;
 
     private final Map<String, BuildJobState> jobs = new ConcurrentHashMap<>();
     private final Map<UUID, Set<String>> playerJobs = new ConcurrentHashMap<>();
@@ -77,25 +77,71 @@ public final class BuildJobManager {
                 System.currentTimeMillis(),
                 message.requestId()
         );
+
+        ServerLevel targetLevel = resolveTargetLevel(player, job);
+        if (targetLevel == null) {
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    job.jobId(),
+                    "DIMENSION_UNAVAILABLE",
+                    "Ziel-Dimension nicht geladen.",
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    System.currentTimeMillis()
+            ));
+            sendChat(player, Component.literal("[EasyBuild] Dimension " + job.anchor().dimension() + " ist nicht verfügbar."));
+            return;
+        }
+
+        BlockPlacementPlan plan;
+        try {
+            plan = BlockPlacementPlanner.plan(targetLevel, job, job.options());
+        } catch (BlockPlacementException ex) {
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    job.jobId(),
+                    ex.reasonCode(),
+                    ex.getMessage(),
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    System.currentTimeMillis()
+            ));
+            sendChat(player, Component.literal("[EasyBuild] Job abgelehnt: " + ex.getMessage()));
+            LOGGER.debug("Rejected job {} due to planning error: {}", job.jobId(), ex.getMessage());
+            return;
+        } catch (Exception ex) {
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    job.jobId(),
+                    "PLAN_FAILURE",
+                    ex.getMessage(),
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    System.currentTimeMillis()
+            ));
+            LOGGER.warn("Failed to prepare job {}", job.jobId(), ex);
+            return;
+        }
+
         BuildJobState state = new BuildJobState(job, UUID.randomUUID());
+        state.attachPlan(plan);
+        state.updateProgress(0, plan.totalBlocks(), JobPhase.QUEUED);
 
         jobs.put(jobId, state);
         playerJobs.computeIfAbsent(player.getUUID(), uuid -> ConcurrentHashMap.newKeySet()).add(jobId);
         jobQueue.add(state);
 
+        long estimatedTicks = estimateDurationTicks(job, plan);
         long now = System.currentTimeMillis();
         EasyBuildPacketSender.sendTo(player, new ClientboundBuildAccepted(
                 job.jobId(),
                 job.mode(),
-                estimateDurationTicks(job),
+                estimatedTicks,
                 state.reservationToken(),
                 ThreadLocalRandom.current().nextLong(),
                 now
         ));
 
-        sendChat(player, Component.literal("[EasyBuild] Build-Job " + job.jobId() + " aufgenommen (Modus: " + job.mode() + ")"));
+        sendChat(player, Component.literal("[EasyBuild] Build-Job " + job.jobId() + " aufgenommen – " + plan.totalBlocks() + " Blöcke."));
 
-        LOGGER.debug("Queued EasyBuild job {} for player {}", job.jobId(), player.getGameProfile().name());
+        LOGGER.debug("Queued EasyBuild job {} for player {} ({} blocks)", job.jobId(), player.getGameProfile().name(), plan.totalBlocks());
     }
 
     public void cancelJob(ServerPlayer player, String jobId) {
@@ -186,8 +232,13 @@ public final class BuildJobManager {
         state.setPhase(finalPhase);
     }
 
-    private long estimateDurationTicks(BuildJob job) {
-        return TICKS_PER_JOB;
+    private long estimateDurationTicks(BuildJob job, BlockPlacementPlan plan) {
+        int total = plan != null ? plan.totalBlocks() : 0;
+        int perTick = resolveBlocksPerTick(job);
+        if (perTick == Integer.MAX_VALUE || total == 0) {
+            return 1L;
+        }
+        return Math.max(1L, (long) Math.ceil((double) total / perTick));
     }
 
     private void sendChat(ServerPlayer player, Component component) {
@@ -198,51 +249,127 @@ public final class BuildJobManager {
         state.updateProgress(placed, total, phase);
     }
 
+    private int resolveBlocksPerTick(BuildJob job) {
+        if (job.mode() == PasteMode.ATOMIC) {
+            return Integer.MAX_VALUE;
+        }
+
+        int base = switch (job.mode()) {
+            case STEP -> 64;
+            case SIMULATED -> 24;
+            default -> 32;
+        };
+
+        JsonObject options = job.options();
+        if (options != null && options.has("blocksPerTick")) {
+            try {
+                int configured = options.get("blocksPerTick").getAsInt();
+                if (configured > 0) {
+                    base = configured;
+                }
+            } catch (Exception ignored) {
+                // Ignore malformed configuration; fall back to default.
+            }
+        }
+
+        return Math.max(1, Math.min(2048, base));
+    }
+
+    private ServerLevel resolveTargetLevel(ServerPlayer player, BuildJob job) {
+        if (player == null) {
+            return null;
+        }
+        ResourceKey<Level> dimensionKey = BlockPlacementPlanner.resolveDimensionKey(job.anchor());
+        return ((ServerLevel) player.level()).getServer().getLevel(dimensionKey);
+    }
+
+    private ServerLevel resolveTargetLevel(ServerLevel reference, BuildJob job) {
+        if (reference == null || reference.getServer() == null) {
+            return null;
+        }
+        ResourceKey<Level> dimensionKey = BlockPlacementPlanner.resolveDimensionKey(job.anchor());
+        return reference.getServer().getLevel(dimensionKey);
+    }
+
     public void tickServer(ServerLevel level) {
         if (!level.dimension().equals(Level.OVERWORLD)) {
             return;
         }
 
         if (currentJob == null) {
-            BuildJobState next = jobQueue.poll();
-            if (next != null) {
-                currentJob = new ActiveJob(next);
-                next.setPhase(JobPhase.RESERVING);
-                sendChatToOwner(level, next, Component.literal("[EasyBuild] Reservierung gestartet (Stub)."));
+            BuildJobState nextState;
+            while ((nextState = jobQueue.poll()) != null) {
+                ServerLevel targetLevel = resolveTargetLevel(level, nextState.job());
+                if (targetLevel == null) {
+                    failJob(level, nextState, "DIMENSION_UNAVAILABLE", "Ziel-Dimension nicht geladen.", false);
+                    continue;
+                }
+
+                BlockPlacementPlan plan = nextState.plan();
+                if (plan == null) {
+                    try {
+                        plan = BlockPlacementPlanner.plan(targetLevel, nextState.job(), nextState.job().options());
+                        nextState.attachPlan(plan);
+                        nextState.updateProgress(nextState.placed(), plan.totalBlocks(), JobPhase.QUEUED);
+                    } catch (BlockPlacementException ex) {
+                        failJob(targetLevel, nextState, ex.reasonCode(), ex.getMessage(), false);
+                        continue;
+                    } catch (Exception ex) {
+                        failJob(targetLevel, nextState, "PLAN_FAILURE", ex.getMessage(), false);
+                        continue;
+                    }
+                }
+
+                BlockPlacementExecutor executor = new BlockPlacementExecutor(
+                        targetLevel,
+                        plan,
+                        nextState.job().mode(),
+                        resolveBlocksPerTick(nextState.job())
+                );
+                nextState.setPhase(JobPhase.PLACING);
+                publishProgress(nextState, executor.placedBlocks(), executor.totalBlocks(), JobPhase.PLACING);
+                currentJob = new ActiveJob(nextState, targetLevel, executor);
+                sendChatToOwner(targetLevel, nextState, Component.literal("[EasyBuild] Starte Platzierung (" + nextState.job().mode() + ")"));
+                break;
             }
         }
 
         if (currentJob != null) {
-            currentJob.ticksElapsed++;
-            BuildJobState state = currentJob.state;
-            if (state.phase() == JobPhase.RESERVING && currentJob.ticksElapsed >= 5) {
-                state.setPhase(JobPhase.PLACING);
-                sendChatToOwner(level, state, Component.literal("[EasyBuild] Baue jetzt (Stub)."));
-            }
-
-            int blocksPerTick = Math.max(1, SIMULATED_TOTAL_BLOCKS / TICKS_PER_JOB);
-            int placed = Math.min(SIMULATED_TOTAL_BLOCKS, currentJob.ticksElapsed * blocksPerTick);
-            publishProgress(state, placed, SIMULATED_TOTAL_BLOCKS, state.phase());
-            EasyBuildPacketSender.sendTo(level, state.job().ownerUuid(), new ClientboundProgressUpdate(
-                    state.job().jobId(),
-                    placed,
-                    SIMULATED_TOTAL_BLOCKS,
-                    state.phase(),
-                    "",
-                    ThreadLocalRandom.current().nextLong(),
-                    System.currentTimeMillis()
-            ));
-
-            if (currentJob.ticksElapsed >= TICKS_PER_JOB) {
-                completeJob(level, state);
+            ActiveJob active = currentJob;
+            try {
+                boolean finished = active.executor.tick();
+                int placed = active.executor.placedBlocks();
+                int total = active.executor.totalBlocks();
+                JobPhase phase = finished ? JobPhase.COMPLETED : JobPhase.PLACING;
+                publishProgress(active.state, placed, total, phase);
+                EasyBuildPacketSender.sendTo(active.level, active.state.job().ownerUuid(), new ClientboundProgressUpdate(
+                        active.state.job().jobId(),
+                        placed,
+                        total,
+                        phase,
+                        progressMessage(placed, total, finished),
+                        ThreadLocalRandom.current().nextLong(),
+                        System.currentTimeMillis()
+                ));
+                if (finished) {
+                    completeJob(active.level, active.state, active.executor);
+                    currentJob = null;
+                }
+            } catch (BlockPlacementException ex) {
+                LOGGER.warn("Job {} failed during placement: {}", active.state.job().jobId(), ex.getMessage());
+                failJob(active.level, active.state, ex.reasonCode(), ex.getMessage(), false);
+                currentJob = null;
+            } catch (Exception ex) {
+                LOGGER.error("Unexpected error while running job {}", active.state.job().jobId(), ex);
+                failJob(active.level, active.state, "UNEXPECTED_ERROR", ex.getMessage(), false);
                 currentJob = null;
             }
         }
     }
 
-    private void completeJob(ServerLevel level, BuildJobState state) {
+    private void completeJob(ServerLevel level, BuildJobState state, BlockPlacementExecutor executor) {
         removeJob(state, JobPhase.COMPLETED);
-        publishProgress(state, SIMULATED_TOTAL_BLOCKS, SIMULATED_TOTAL_BLOCKS, JobPhase.COMPLETED);
+        publishProgress(state, executor.totalBlocks(), executor.totalBlocks(), JobPhase.COMPLETED);
         EasyBuildPacketSender.sendTo(level, state.job().ownerUuid(), new ClientboundBuildCompleted(
                 state.job().jobId(),
                 true,
@@ -254,18 +381,44 @@ public final class BuildJobManager {
         sendChatToOwner(level, state, Component.literal("[EasyBuild] Job " + state.job().jobId() + " abgeschlossen."));
     }
 
+    private void failJob(ServerLevel level, BuildJobState state, String reasonCode, String details, boolean rolledBack) {
+        removeJob(state, rolledBack ? JobPhase.ROLLING_BACK : JobPhase.CANCELLED);
+        String safeDetails = (details == null || details.isBlank()) ? "Unbekannter Fehler" : details;
+        EasyBuildPacketSender.sendTo(level, state.job().ownerUuid(), new ClientboundBuildFailed(
+                state.job().jobId(),
+                reasonCode,
+                safeDetails,
+                rolledBack,
+                ThreadLocalRandom.current().nextLong(),
+                System.currentTimeMillis()
+        ));
+        sendChatToOwner(level, state, Component.literal("[EasyBuild] Job " + state.job().jobId() + " fehlgeschlagen: " + safeDetails));
+    }
+
     private void sendChatToOwner(ServerLevel level, BuildJobState state, Component message) {
         Optional.ofNullable(level.getServer().getPlayerList().getPlayer(state.job().ownerUuid()))
                 .ifPresent(player -> sendChat(player, message));
     }
 
+    private String progressMessage(int placed, int total, boolean finished) {
+        if (finished) {
+            return "Abgeschlossen";
+        }
+        if (total <= 0) {
+            return "";
+        }
+        return placed + " / " + total;
+    }
+
     private static final class ActiveJob {
         private final BuildJobState state;
-        private int ticksElapsed;
+        private final ServerLevel level;
+        private final BlockPlacementExecutor executor;
 
-        private ActiveJob(BuildJobState state) {
+        private ActiveJob(BuildJobState state, ServerLevel level, BlockPlacementExecutor executor) {
             this.state = state;
-            this.ticksElapsed = 0;
+            this.level = level;
+            this.executor = executor;
         }
     }
 }

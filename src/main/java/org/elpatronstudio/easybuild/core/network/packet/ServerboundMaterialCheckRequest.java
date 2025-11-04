@@ -1,11 +1,16 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import org.elpatronstudio.easybuild.core.model.AnchorPos;
 import org.elpatronstudio.easybuild.core.model.ChestRef;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
+import org.elpatronstudio.easybuild.server.material.MaterialCheckService;
 
 import java.util.List;
 import java.util.Objects;
@@ -21,7 +26,12 @@ public record ServerboundMaterialCheckRequest(
         List<ChestRef> chests,
         List<MaterialStack> clientEstimate,
         long nonce
-) {
+) implements CustomPacketPayload {
+
+    public static final ResourceLocation ID = EasyBuildNetwork.payloadId("material_check_request");
+    public static final Type<ServerboundMaterialCheckRequest> TYPE = new Type<>(ID);
+    public static final StreamCodec<RegistryFriendlyByteBuf, ServerboundMaterialCheckRequest> STREAM_CODEC =
+            StreamCodec.of(ServerboundMaterialCheckRequest::write, ServerboundMaterialCheckRequest::read);
 
     public ServerboundMaterialCheckRequest {
         Objects.requireNonNull(playerUuid, "playerUuid");
@@ -31,7 +41,7 @@ public record ServerboundMaterialCheckRequest(
         Objects.requireNonNull(clientEstimate, "clientEstimate");
     }
 
-    public static void encode(ServerboundMaterialCheckRequest message, FriendlyByteBuf buf) {
+    private static void write(RegistryFriendlyByteBuf buf, ServerboundMaterialCheckRequest message) {
         buf.writeUUID(message.playerUuid);
         FriendlyByteBufUtil.writeSchematicRef(buf, message.schematic);
         FriendlyByteBufUtil.writeAnchor(buf, message.anchor);
@@ -40,7 +50,7 @@ public record ServerboundMaterialCheckRequest(
         buf.writeLong(message.nonce);
     }
 
-    public static ServerboundMaterialCheckRequest decode(FriendlyByteBuf buf) {
+    private static ServerboundMaterialCheckRequest read(RegistryFriendlyByteBuf buf) {
         UUID playerUuid = buf.readUUID();
         SchematicRef schematic = FriendlyByteBufUtil.readSchematicRef(buf);
         AnchorPos anchor = FriendlyByteBufUtil.readAnchor(buf);
@@ -50,7 +60,12 @@ public record ServerboundMaterialCheckRequest(
         return new ServerboundMaterialCheckRequest(playerUuid, schematic, anchor, chests, estimate, nonce);
     }
 
+    @Override
+    public Type<ServerboundMaterialCheckRequest> type() {
+        return TYPE;
+    }
+
     public void handle(ServerPlayer player) {
-        // TODO: implement server-side material validation pipeline once the networking layer is wired up.
+        MaterialCheckService.get().handle(player, this);
     }
 }

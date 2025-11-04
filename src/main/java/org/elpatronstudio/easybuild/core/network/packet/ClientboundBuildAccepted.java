@@ -1,8 +1,12 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import org.elpatronstudio.easybuild.core.model.PasteMode;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -17,7 +21,12 @@ public record ClientboundBuildAccepted(
         UUID reservationToken,
         long nonce,
         long serverTime
-) {
+) implements CustomPacketPayload {
+
+    public static final ResourceLocation ID = EasyBuildNetwork.payloadId("build_accepted");
+    public static final Type<ClientboundBuildAccepted> TYPE = new Type<>(ID);
+    public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundBuildAccepted> STREAM_CODEC =
+            StreamCodec.of(ClientboundBuildAccepted::write, ClientboundBuildAccepted::read);
 
     public ClientboundBuildAccepted {
         Objects.requireNonNull(jobId, "jobId");
@@ -25,7 +34,7 @@ public record ClientboundBuildAccepted(
         Objects.requireNonNull(reservationToken, "reservationToken");
     }
 
-    public static void encode(ClientboundBuildAccepted message, FriendlyByteBuf buf) {
+    private static void write(RegistryFriendlyByteBuf buf, ClientboundBuildAccepted message) {
         buf.writeUtf(message.jobId);
         buf.writeEnum(message.mode);
         buf.writeLong(message.estimatedDurationTicks);
@@ -34,7 +43,7 @@ public record ClientboundBuildAccepted(
         buf.writeLong(message.serverTime);
     }
 
-    public static ClientboundBuildAccepted decode(FriendlyByteBuf buf) {
+    private static ClientboundBuildAccepted read(RegistryFriendlyByteBuf buf) {
         String jobId = buf.readUtf();
         PasteMode mode = buf.readEnum(PasteMode.class);
         long estimate = buf.readLong();
@@ -42,6 +51,11 @@ public record ClientboundBuildAccepted(
         long nonce = buf.readLong();
         long serverTime = buf.readLong();
         return new ClientboundBuildAccepted(jobId, mode, estimate, token, nonce, serverTime);
+    }
+
+    @Override
+    public Type<ClientboundBuildAccepted> type() {
+        return TYPE;
     }
 
     public void handleClient() {

@@ -1,7 +1,11 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.List;
 import java.util.Objects;
@@ -16,7 +20,12 @@ public record ClientboundHelloAcknowledge(
         String configHash,
         long nonce,
         long serverTime
-) {
+) implements CustomPacketPayload {
+
+    public static final ResourceLocation ID = EasyBuildNetwork.payloadId("hello_ack");
+    public static final Type<ClientboundHelloAcknowledge> TYPE = new Type<>(ID);
+    public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundHelloAcknowledge> STREAM_CODEC =
+            StreamCodec.of(ClientboundHelloAcknowledge::write, ClientboundHelloAcknowledge::read);
 
     public ClientboundHelloAcknowledge {
         Objects.requireNonNull(protocolVersion, "protocolVersion");
@@ -27,7 +36,7 @@ public record ClientboundHelloAcknowledge(
         }
     }
 
-    public static void encode(ClientboundHelloAcknowledge message, FriendlyByteBuf buf) {
+    private static void write(RegistryFriendlyByteBuf buf, ClientboundHelloAcknowledge message) {
         buf.writeUtf(message.protocolVersion);
         buf.writeUtf(message.serverVersion);
         FriendlyByteBufUtil.writeStringList(buf, message.serverCapabilities);
@@ -36,7 +45,7 @@ public record ClientboundHelloAcknowledge(
         buf.writeLong(message.serverTime);
     }
 
-    public static ClientboundHelloAcknowledge decode(FriendlyByteBuf buf) {
+    private static ClientboundHelloAcknowledge read(RegistryFriendlyByteBuf buf) {
         String protocolVersion = buf.readUtf();
         String serverVersion = buf.readUtf();
         List<String> serverCapabilities = FriendlyByteBufUtil.readStringList(buf);
@@ -44,6 +53,11 @@ public record ClientboundHelloAcknowledge(
         long nonce = buf.readLong();
         long serverTime = buf.readLong();
         return new ClientboundHelloAcknowledge(protocolVersion, serverVersion, serverCapabilities, configHash, nonce, serverTime);
+    }
+
+    @Override
+    public Type<ClientboundHelloAcknowledge> type() {
+        return TYPE;
     }
 
     public void handleClient() {

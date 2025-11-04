@@ -6,17 +6,24 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import org.elpatronstudio.easybuild.core.model.JobPhase;
+import org.elpatronstudio.easybuild.core.network.EasyBuildPacketSender;
+import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildAccepted;
+import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildCompleted;
+import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildFailed;
+import org.elpatronstudio.easybuild.core.network.packet.ClientboundProgressUpdate;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundAcknowledgeStatus;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundRequestBuild;
 import org.elpatronstudio.easybuild.server.ServerHandshakeService;
 import org.slf4j.Logger;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Coordinates server-side build job lifecycle.
@@ -48,6 +55,14 @@ public final class BuildJobManager {
 
         if (ServerHandshakeService.getSession(player.getUUID()) == null) {
             sendChat(player, Component.literal("[EasyBuild] Bitte zuerst einen gültigen Handshake abschließen."));
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    message.requestId(),
+                    "HANDSHAKE_REQUIRED",
+                    "Handshake required before requesting builds.",
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    System.currentTimeMillis()
+            ));
             return;
         }
 
@@ -68,6 +83,16 @@ public final class BuildJobManager {
         playerJobs.computeIfAbsent(player.getUUID(), uuid -> ConcurrentHashMap.newKeySet()).add(jobId);
         jobQueue.add(state);
 
+        long now = System.currentTimeMillis();
+        EasyBuildPacketSender.sendTo(player, new ClientboundBuildAccepted(
+                job.jobId(),
+                job.mode(),
+                estimateDurationTicks(job),
+                state.reservationToken(),
+                ThreadLocalRandom.current().nextLong(),
+                now
+        ));
+
         sendChat(player, Component.literal("[EasyBuild] Build-Job " + job.jobId() + " aufgenommen (Modus: " + job.mode() + ")"));
 
         LOGGER.debug("Queued EasyBuild job {} for player {}", job.jobId(), player.getGameProfile().name());
@@ -81,6 +106,14 @@ public final class BuildJobManager {
         BuildJobState state = jobs.get(jobId);
         if (state == null) {
             sendChat(player, Component.literal("[EasyBuild] Kein aktiver Job mit ID " + jobId + "."));
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    jobId,
+                    "JOB_NOT_FOUND",
+                    "Kein aktiver Job mit dieser ID.",
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    System.currentTimeMillis()
+            ));
             return;
         }
 
@@ -88,6 +121,15 @@ public final class BuildJobManager {
             sendChat(player, Component.literal("[EasyBuild] Dieser Job gehört einem anderen Spieler."));
             return;
         }
+
+        EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                jobId,
+                "CANCELLED",
+                "Job wurde abgebrochen.",
+                false,
+                ThreadLocalRandom.current().nextLong(),
+                System.currentTimeMillis()
+        ));
 
         removeJob(state, JobPhase.CANCELLED);
         sendChat(player, Component.literal("[EasyBuild] Job " + jobId + " wurde abgebrochen."));
@@ -130,7 +172,7 @@ public final class BuildJobManager {
 
     private void removeJob(BuildJobState state, JobPhase finalPhase) {
         jobs.remove(state.job().jobId());
-        jobQueue.removeIf(candidate -> candidate == state);
+        jobQueue.remove(state);
         if (currentJob != null && currentJob.state == state) {
             currentJob = null;
         }
@@ -145,8 +187,7 @@ public final class BuildJobManager {
     }
 
     private long estimateDurationTicks(BuildJob job) {
-        // TODO: compute estimate based on schematic size and server config.
-        return 0L;
+        return TICKS_PER_JOB;
     }
 
     private void sendChat(ServerPlayer player, Component component) {
@@ -155,9 +196,6 @@ public final class BuildJobManager {
 
     public void publishProgress(BuildJobState state, int placed, int total, JobPhase phase) {
         state.updateProgress(placed, total, phase);
-        // Placeholder: broadcast to owner only for now.
-        // This assumes the owner is online and present in playerJobs map.
-        // Actual implementation will push via scheduler context.
     }
 
     public void tickServer(ServerLevel level) {
@@ -182,8 +220,18 @@ public final class BuildJobManager {
                 sendChatToOwner(level, state, Component.literal("[EasyBuild] Baue jetzt (Stub)."));
             }
 
-            int placed = Math.min(SIMULATED_TOTAL_BLOCKS, currentJob.ticksElapsed * (SIMULATED_TOTAL_BLOCKS / Math.max(1, TICKS_PER_JOB)));
+            int blocksPerTick = Math.max(1, SIMULATED_TOTAL_BLOCKS / TICKS_PER_JOB);
+            int placed = Math.min(SIMULATED_TOTAL_BLOCKS, currentJob.ticksElapsed * blocksPerTick);
             publishProgress(state, placed, SIMULATED_TOTAL_BLOCKS, state.phase());
+            EasyBuildPacketSender.sendTo(level, state.job().ownerUuid(), new ClientboundProgressUpdate(
+                    state.job().jobId(),
+                    placed,
+                    SIMULATED_TOTAL_BLOCKS,
+                    state.phase(),
+                    "",
+                    ThreadLocalRandom.current().nextLong(),
+                    System.currentTimeMillis()
+            ));
 
             if (currentJob.ticksElapsed >= TICKS_PER_JOB) {
                 completeJob(level, state);
@@ -195,6 +243,14 @@ public final class BuildJobManager {
     private void completeJob(ServerLevel level, BuildJobState state) {
         removeJob(state, JobPhase.COMPLETED);
         publishProgress(state, SIMULATED_TOTAL_BLOCKS, SIMULATED_TOTAL_BLOCKS, JobPhase.COMPLETED);
+        EasyBuildPacketSender.sendTo(level, state.job().ownerUuid(), new ClientboundBuildCompleted(
+                state.job().jobId(),
+                true,
+                List.of(),
+                "",
+                ThreadLocalRandom.current().nextLong(),
+                System.currentTimeMillis()
+        ));
         sendChatToOwner(level, state, Component.literal("[EasyBuild] Job " + state.job().jobId() + " abgeschlossen."));
     }
 

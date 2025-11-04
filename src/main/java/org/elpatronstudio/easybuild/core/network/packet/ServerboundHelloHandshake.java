@@ -1,7 +1,11 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 import org.elpatronstudio.easybuild.server.ServerHandshakeService;
 
 import java.util.ArrayList;
@@ -18,7 +22,12 @@ public record ServerboundHelloHandshake(
         String protocolVersion,
         List<String> clientCapabilities,
         long nonce
-) {
+) implements CustomPacketPayload {
+
+    public static final ResourceLocation ID = EasyBuildNetwork.payloadId("hello_handshake");
+    public static final Type<ServerboundHelloHandshake> TYPE = new Type<>(ID);
+    public static final StreamCodec<RegistryFriendlyByteBuf, ServerboundHelloHandshake> STREAM_CODEC =
+            StreamCodec.of(ServerboundHelloHandshake::write, ServerboundHelloHandshake::read);
 
     public ServerboundHelloHandshake {
         Objects.requireNonNull(playerUuid, "playerUuid");
@@ -27,7 +36,7 @@ public record ServerboundHelloHandshake(
         Objects.requireNonNull(clientCapabilities, "clientCapabilities");
     }
 
-    public static void encode(ServerboundHelloHandshake message, FriendlyByteBuf buf) {
+    private static void write(RegistryFriendlyByteBuf buf, ServerboundHelloHandshake message) {
         buf.writeUUID(message.playerUuid);
         buf.writeUtf(message.clientVersion);
         buf.writeUtf(message.protocolVersion);
@@ -35,13 +44,18 @@ public record ServerboundHelloHandshake(
         buf.writeLong(message.nonce);
     }
 
-    public static ServerboundHelloHandshake decode(FriendlyByteBuf buf) {
+    private static ServerboundHelloHandshake read(RegistryFriendlyByteBuf buf) {
         UUID uuid = buf.readUUID();
         String clientVersion = buf.readUtf();
         String protocolVersion = buf.readUtf();
         List<String> capabilities = new ArrayList<>(FriendlyByteBufUtil.readStringList(buf));
         long nonce = buf.readLong();
         return new ServerboundHelloHandshake(uuid, clientVersion, protocolVersion, capabilities, nonce);
+    }
+
+    @Override
+    public Type<ServerboundHelloHandshake> type() {
+        return TYPE;
     }
 
     public void handle(ServerPlayer player) {

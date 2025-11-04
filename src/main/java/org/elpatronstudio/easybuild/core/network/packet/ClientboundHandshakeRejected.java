@@ -1,7 +1,11 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.Objects;
 
@@ -12,7 +16,12 @@ public record ClientboundHandshakeRejected(
         String reason,
         String requiredProtocol,
         long serverTime
-) {
+) implements CustomPacketPayload {
+
+    public static final ResourceLocation ID = EasyBuildNetwork.payloadId("handshake_rejected");
+    public static final Type<ClientboundHandshakeRejected> TYPE = new Type<>(ID);
+    public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundHandshakeRejected> STREAM_CODEC =
+            StreamCodec.of(ClientboundHandshakeRejected::write, ClientboundHandshakeRejected::read);
 
     public ClientboundHandshakeRejected {
         Objects.requireNonNull(reason, "reason");
@@ -21,17 +30,22 @@ public record ClientboundHandshakeRejected(
         }
     }
 
-    public static void encode(ClientboundHandshakeRejected message, FriendlyByteBuf buf) {
+    private static void write(RegistryFriendlyByteBuf buf, ClientboundHandshakeRejected message) {
         buf.writeUtf(message.reason);
         buf.writeUtf(message.requiredProtocol);
         buf.writeLong(message.serverTime);
     }
 
-    public static ClientboundHandshakeRejected decode(FriendlyByteBuf buf) {
+    private static ClientboundHandshakeRejected read(RegistryFriendlyByteBuf buf) {
         String reason = buf.readUtf();
         String required = buf.readUtf();
         long serverTime = buf.readLong();
         return new ClientboundHandshakeRejected(reason, required, serverTime);
+    }
+
+    @Override
+    public Type<ClientboundHandshakeRejected> type() {
+        return TYPE;
     }
 
     public void handleClient() {

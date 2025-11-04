@@ -1,8 +1,12 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -18,7 +22,12 @@ public record ClientboundRegionLocked(
         long etaTicks,
         long nonce,
         long serverTime
-) {
+) implements CustomPacketPayload {
+
+    public static final ResourceLocation ID = EasyBuildNetwork.payloadId("region_locked");
+    public static final Type<ClientboundRegionLocked> TYPE = new Type<>(ID);
+    public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundRegionLocked> STREAM_CODEC =
+            StreamCodec.of(ClientboundRegionLocked::write, ClientboundRegionLocked::read);
 
     public ClientboundRegionLocked {
         Objects.requireNonNull(schematic, "schematic");
@@ -29,7 +38,7 @@ public record ClientboundRegionLocked(
         }
     }
 
-    public static void encode(ClientboundRegionLocked message, FriendlyByteBuf buf) {
+    private static void write(RegistryFriendlyByteBuf buf, ClientboundRegionLocked message) {
         FriendlyByteBufUtil.writeSchematicRef(buf, message.schematic);
         buf.writeUtf(message.lockingJobId);
         buf.writeUUID(message.ownerUuid);
@@ -39,7 +48,7 @@ public record ClientboundRegionLocked(
         buf.writeLong(message.serverTime);
     }
 
-    public static ClientboundRegionLocked decode(FriendlyByteBuf buf) {
+    private static ClientboundRegionLocked read(RegistryFriendlyByteBuf buf) {
         SchematicRef schematic = FriendlyByteBufUtil.readSchematicRef(buf);
         String jobId = buf.readUtf();
         UUID ownerUuid = buf.readUUID();
@@ -48,6 +57,11 @@ public record ClientboundRegionLocked(
         long nonce = buf.readLong();
         long serverTime = buf.readLong();
         return new ClientboundRegionLocked(schematic, jobId, ownerUuid, ownerName, etaTicks, nonce, serverTime);
+    }
+
+    @Override
+    public Type<ClientboundRegionLocked> type() {
+        return TYPE;
     }
 
     public void handleClient() {

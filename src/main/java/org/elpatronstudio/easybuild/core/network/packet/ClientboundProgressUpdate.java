@@ -1,8 +1,12 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import org.elpatronstudio.easybuild.core.model.JobPhase;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.Objects;
 
@@ -17,7 +21,12 @@ public record ClientboundProgressUpdate(
         String message,
         long nonce,
         long serverTime
-) {
+) implements CustomPacketPayload {
+
+    public static final ResourceLocation ID = EasyBuildNetwork.payloadId("progress_update");
+    public static final Type<ClientboundProgressUpdate> TYPE = new Type<>(ID);
+    public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundProgressUpdate> STREAM_CODEC =
+        StreamCodec.of(ClientboundProgressUpdate::write, ClientboundProgressUpdate::read);
 
     public ClientboundProgressUpdate {
         Objects.requireNonNull(jobId, "jobId");
@@ -27,17 +36,17 @@ public record ClientboundProgressUpdate(
         }
     }
 
-    public static void encode(ClientboundProgressUpdate message, FriendlyByteBuf buf) {
-        buf.writeUtf(message.jobId);
-        buf.writeVarInt(message.placed);
-        buf.writeVarInt(message.total);
-        buf.writeEnum(message.phase);
-        buf.writeUtf(message.message);
-        buf.writeLong(message.nonce);
-        buf.writeLong(message.serverTime);
+    private static void write(RegistryFriendlyByteBuf buf, ClientboundProgressUpdate value) {
+        buf.writeUtf(value.jobId);
+        buf.writeVarInt(value.placed);
+        buf.writeVarInt(value.total);
+        buf.writeEnum(value.phase);
+        buf.writeUtf(value.message);
+        buf.writeLong(value.nonce);
+        buf.writeLong(value.serverTime);
     }
 
-    public static ClientboundProgressUpdate decode(FriendlyByteBuf buf) {
+    private static ClientboundProgressUpdate read(RegistryFriendlyByteBuf buf) {
         String jobId = buf.readUtf();
         int placed = buf.readVarInt();
         int total = buf.readVarInt();
@@ -46,6 +55,11 @@ public record ClientboundProgressUpdate(
         long nonce = buf.readLong();
         long serverTime = buf.readLong();
         return new ClientboundProgressUpdate(jobId, placed, total, phase, message, nonce, serverTime);
+    }
+
+    @Override
+    public Type<ClientboundProgressUpdate> type() {
+        return TYPE;
     }
 
     public void handleClient() {

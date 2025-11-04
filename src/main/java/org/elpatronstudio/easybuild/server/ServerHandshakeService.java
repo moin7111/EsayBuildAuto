@@ -3,6 +3,9 @@ package org.elpatronstudio.easybuild.server;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
+import org.elpatronstudio.easybuild.core.network.EasyBuildPacketSender;
+import org.elpatronstudio.easybuild.core.network.packet.ClientboundHandshakeRejected;
+import org.elpatronstudio.easybuild.core.network.packet.ClientboundHelloAcknowledge;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundHelloHandshake;
 
 import java.time.Instant;
@@ -29,6 +32,11 @@ public final class ServerHandshakeService {
         }
 
         if (!EasyBuildNetwork.PROTOCOL_VERSION.equals(message.protocolVersion())) {
+            EasyBuildPacketSender.sendTo(player, new ClientboundHandshakeRejected(
+                    "Protocol mismatch",
+                    EasyBuildNetwork.PROTOCOL_VERSION,
+                    System.currentTimeMillis()
+            ));
             player.sendSystemMessage(Component.literal("[EasyBuild] Netzwerk-Version nicht kompatibel (Server: "
                     + EasyBuildNetwork.PROTOCOL_VERSION + ", Client: " + message.protocolVersion() + ")"));
             return;
@@ -43,6 +51,15 @@ public final class ServerHandshakeService {
                 serverNonce
         );
         SESSIONS.put(player.getUUID(), session);
+
+        EasyBuildPacketSender.sendTo(player, new ClientboundHelloAcknowledge(
+                EasyBuildNetwork.PROTOCOL_VERSION,
+                getServerVersion(),
+                serverCapabilities(),
+                currentConfigHash(),
+                serverNonce,
+                System.currentTimeMillis()
+        ));
 
         player.sendSystemMessage(Component.literal("[EasyBuild] Handshake abgeschlossen (Version "
                 + EasyBuildNetwork.PROTOCOL_VERSION + ")"));

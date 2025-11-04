@@ -68,6 +68,8 @@ public class Esaybuildauto {
         // Register the commonSetup method for modloading
         modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::onClientSetup);
+        modEventBus.addListener(EasyBuildNetwork::onRegisterPayloadHandlers);
+        modEventBus.addListener(EasyBuildNetwork::onRegisterClientPayloadHandlers);
         modEventBus.addListener(Config::onLoad);
 
         // Register the Deferred Register to the mod event bus so blocks get registered
@@ -93,8 +95,6 @@ public class Esaybuildauto {
       private void commonSetup(final FMLCommonSetupEvent event) {
           // Some common setup code
           LOGGER.info("HELLO FROM COMMON SETUP");
-
-          event.enqueueWork(EasyBuildNetwork::register);
 
           if (Config.logDirtBlock) LOGGER.info("DIRT BLOCK >> {}", BuiltInRegistries.BLOCK.getKey(Blocks.DIRT));
 

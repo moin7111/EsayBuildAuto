@@ -4,11 +4,15 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import org.elpatronstudio.easybuild.core.model.AnchorPos;
 import org.elpatronstudio.easybuild.core.model.PasteMode;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 import org.elpatronstudio.easybuild.server.job.BuildJobManager;
 
 import java.util.Objects;
@@ -25,8 +29,12 @@ public record ServerboundRequestBuild(
         JsonObject options,
         String requestId,
         long nonce
-) {
+) implements CustomPacketPayload {
 
+    public static final ResourceLocation ID = EasyBuildNetwork.payloadId("request_build");
+    public static final Type<ServerboundRequestBuild> TYPE = new Type<>(ID);
+    public static final StreamCodec<RegistryFriendlyByteBuf, ServerboundRequestBuild> STREAM_CODEC =
+            StreamCodec.of(ServerboundRequestBuild::write, ServerboundRequestBuild::read);
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
     public ServerboundRequestBuild {
@@ -40,7 +48,7 @@ public record ServerboundRequestBuild(
         }
     }
 
-    public static void encode(ServerboundRequestBuild message, FriendlyByteBuf buf) {
+    private static void write(RegistryFriendlyByteBuf buf, ServerboundRequestBuild message) {
         buf.writeUUID(message.playerUuid);
         FriendlyByteBufUtil.writeSchematicRef(buf, message.schematic);
         FriendlyByteBufUtil.writeAnchor(buf, message.anchor);
@@ -50,7 +58,7 @@ public record ServerboundRequestBuild(
         buf.writeLong(message.nonce);
     }
 
-    public static ServerboundRequestBuild decode(FriendlyByteBuf buf) {
+    private static ServerboundRequestBuild read(RegistryFriendlyByteBuf buf) {
         UUID playerUuid = buf.readUUID();
         SchematicRef schematic = FriendlyByteBufUtil.readSchematicRef(buf);
         AnchorPos anchor = FriendlyByteBufUtil.readAnchor(buf);
@@ -59,6 +67,11 @@ public record ServerboundRequestBuild(
         String requestId = buf.readUtf();
         long nonce = buf.readLong();
         return new ServerboundRequestBuild(playerUuid, schematic, anchor, mode, options, requestId, nonce);
+    }
+
+    @Override
+    public Type<ServerboundRequestBuild> type() {
+        return TYPE;
     }
 
     public void handle(ServerPlayer player) {

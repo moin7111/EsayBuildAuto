@@ -9,5 +9,6 @@ public enum JobPhase {
     PLACING,
     PAUSED,
     ROLLING_BACK,
-    COMPLETED;
+    COMPLETED,
+    CANCELLED;
 }

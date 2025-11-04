@@ -28,6 +28,7 @@ import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 import org.slf4j.Logger;
 
 import java.util.function.UnaryOperator;
@@ -87,16 +88,18 @@ public class Esaybuildauto {
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
     }
 
-    private void commonSetup(final FMLCommonSetupEvent event) {
-        // Some common setup code
-        LOGGER.info("HELLO FROM COMMON SETUP");
+      private void commonSetup(final FMLCommonSetupEvent event) {
+          // Some common setup code
+          LOGGER.info("HELLO FROM COMMON SETUP");
 
-        if (Config.logDirtBlock) LOGGER.info("DIRT BLOCK >> {}", BuiltInRegistries.BLOCK.getKey(Blocks.DIRT));
+          event.enqueueWork(EasyBuildNetwork::register);
 
-        LOGGER.info(Config.magicNumberIntroduction + Config.magicNumber);
+          if (Config.logDirtBlock) LOGGER.info("DIRT BLOCK >> {}", BuiltInRegistries.BLOCK.getKey(Blocks.DIRT));
 
-        Config.items.forEach((item) -> LOGGER.info("ITEM >> {}", item.toString()));
-    }
+          LOGGER.info(Config.magicNumberIntroduction + Config.magicNumber);
+
+          Config.items.forEach((item) -> LOGGER.info("ITEM >> {}", item.toString()));
+      }
 
     // Add the example block item to the building blocks tab
     private void addCreative(BuildCreativeModeTabContentsEvent event) {

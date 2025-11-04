@@ -48,6 +48,16 @@ public final class EasyBuildNetwork {
 
         registrar.playToServer(ServerboundAcknowledgeStatus.TYPE, ServerboundAcknowledgeStatus.STREAM_CODEC,
                 (payload, context) -> context.enqueueWork(() -> payload.handle((ServerPlayer) context.player())));
+
+        registrar.playToClient(ClientboundHelloAcknowledge.TYPE, ClientboundHelloAcknowledge.STREAM_CODEC);
+        registrar.playToClient(ClientboundHandshakeRejected.TYPE, ClientboundHandshakeRejected.STREAM_CODEC);
+        registrar.playToClient(ClientboundMaterialCheckResponse.TYPE, ClientboundMaterialCheckResponse.STREAM_CODEC);
+        registrar.playToClient(ClientboundMissingMaterials.TYPE, ClientboundMissingMaterials.STREAM_CODEC);
+        registrar.playToClient(ClientboundBuildAccepted.TYPE, ClientboundBuildAccepted.STREAM_CODEC);
+        registrar.playToClient(ClientboundProgressUpdate.TYPE, ClientboundProgressUpdate.STREAM_CODEC);
+        registrar.playToClient(ClientboundBuildCompleted.TYPE, ClientboundBuildCompleted.STREAM_CODEC);
+        registrar.playToClient(ClientboundBuildFailed.TYPE, ClientboundBuildFailed.STREAM_CODEC);
+        registrar.playToClient(ClientboundRegionLocked.TYPE, ClientboundRegionLocked.STREAM_CODEC);
     }
 
     public static void onRegisterClientPayloadHandlers(RegisterClientPayloadHandlersEvent event) {

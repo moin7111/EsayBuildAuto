@@ -11,6 +11,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
@@ -50,9 +51,18 @@ public final class EasyBuildClient {
     }
 
     public static void init(IEventBus modEventBus) {
-        ClientChestRegistry.load(Minecraft.getInstance().gameDirectory.toPath());
+        modEventBus.addListener(EasyBuildClient::onClientSetup);
         modEventBus.addListener(EasyBuildClient::onRegisterKeyMappings);
         NeoForge.EVENT_BUS.register(EasyBuildClient.class);
+    }
+
+    private static void onClientSetup(final FMLClientSetupEvent event) {
+        event.enqueueWork(() -> {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft != null) {
+                ClientChestRegistry.load(minecraft.gameDirectory.toPath());
+            }
+        });
     }
 
     private static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {

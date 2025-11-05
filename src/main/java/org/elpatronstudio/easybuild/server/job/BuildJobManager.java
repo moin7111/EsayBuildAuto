@@ -16,8 +16,10 @@ import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildFailed;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundProgressUpdate;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundRegionLocked;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundAcknowledgeStatus;
+import org.elpatronstudio.easybuild.core.network.packet.ServerboundCancelBuildRequest;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundRequestBuild;
 import org.elpatronstudio.easybuild.server.ServerHandshakeService;
+import org.elpatronstudio.easybuild.server.security.RequestSecurityManager;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -28,6 +30,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.Locale;
 
 /**
  * Coordinates server-side build job lifecycle.
@@ -68,6 +71,42 @@ public final class BuildJobManager {
         }
 
         String jobId = JobIdGenerator.nextId();
+
+        RequestSecurityManager security = RequestSecurityManager.get();
+        long nowTs = System.currentTimeMillis();
+        RequestSecurityManager.RateLimitResult rate = security.checkRateLimit(player.getUUID(), RequestSecurityManager.RequestType.BUILD_REQUEST, nowTs);
+        if (!rate.allowed()) {
+            String wait = formatSeconds(rate.retryAfterMs());
+            String detail = "Zu viele Build-Anfragen für Request " + message.requestId() + ". Bitte warte " + wait + "s.";
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    jobId,
+                    "RATE_LIMITED",
+                    detail,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    nowTs
+            ));
+            sendChat(player, Component.literal("[EasyBuild] " + detail));
+            LOGGER.debug("Rate limit triggered for build request by {} (retry in {}s)", player.getGameProfile().name(), wait);
+            return;
+        }
+
+        RequestSecurityManager.NonceResult nonceCheck = security.verifyNonce(player.getUUID(), RequestSecurityManager.RequestType.BUILD_REQUEST, message.nonce());
+        if (!nonceCheck.valid()) {
+            String detail = "Anfrage verworfen (" + message.requestId() + "): " + nonceCheck.reason();
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    jobId,
+                    "INVALID_NONCE",
+                    detail,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    nowTs
+            ));
+            sendChat(player, Component.literal("[EasyBuild] " + detail));
+            LOGGER.debug("Rejected build request from {} due to nonce issue: {}", player.getGameProfile().name(), nonceCheck.reason());
+            return;
+        }
+
         BuildJob job = new BuildJob(
                 jobId,
                 player.getUUID(),
@@ -187,8 +226,43 @@ public final class BuildJobManager {
         LOGGER.debug("Queued EasyBuild job {} for player {} ({} blocks)", job.jobId(), player.getGameProfile().name(), plan.totalBlocks());
     }
 
-    public void cancelJob(ServerPlayer player, String jobId) {
+    public void cancelJob(ServerPlayer player, ServerboundCancelBuildRequest message) {
         if (player == null) {
+            return;
+        }
+
+        RequestSecurityManager security = RequestSecurityManager.get();
+        long now = System.currentTimeMillis();
+        RequestSecurityManager.RateLimitResult rate = security.checkRateLimit(player.getUUID(), RequestSecurityManager.RequestType.CANCEL_REQUEST, now);
+        String jobId = message.jobId();
+        if (!rate.allowed()) {
+            String detail = "Zu viele Abbruch-Anfragen für Job " + jobId + ". Bitte warte " + formatSeconds(rate.retryAfterMs()) + "s.";
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    jobId,
+                    "RATE_LIMITED",
+                    detail,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    now
+            ));
+            sendChat(player, Component.literal("[EasyBuild] " + detail));
+            LOGGER.debug("Rate limit triggered for cancel request by {} (job {})", player.getGameProfile().name(), jobId);
+            return;
+        }
+
+        RequestSecurityManager.NonceResult nonceCheck = security.verifyNonce(player.getUUID(), RequestSecurityManager.RequestType.CANCEL_REQUEST, message.nonce());
+        if (!nonceCheck.valid()) {
+            String detail = "Abbruch verworfen (Job " + jobId + "): " + nonceCheck.reason();
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    jobId,
+                    "INVALID_NONCE",
+                    detail,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    now
+            ));
+            sendChat(player, Component.literal("[EasyBuild] " + detail));
+            LOGGER.debug("Rejected cancel request from {} due to nonce issue (job {}): {}", player.getGameProfile().name(), jobId, nonceCheck.reason());
             return;
         }
 
@@ -229,6 +303,20 @@ public final class BuildJobManager {
             return;
         }
 
+        RequestSecurityManager security = RequestSecurityManager.get();
+        long now = System.currentTimeMillis();
+        RequestSecurityManager.RateLimitResult rate = security.checkRateLimit(player.getUUID(), RequestSecurityManager.RequestType.STATUS_ACK, now);
+        if (!rate.allowed()) {
+            LOGGER.debug("Dropping status ACK from {} due to rate limit", player.getGameProfile().name());
+            return;
+        }
+
+        RequestSecurityManager.NonceResult nonceCheck = security.verifyNonce(player.getUUID(), RequestSecurityManager.RequestType.STATUS_ACK, message.nonce());
+        if (!nonceCheck.valid()) {
+            LOGGER.debug("Dropping status ACK from {} due to nonce issue: {}", player.getGameProfile().name(), nonceCheck.reason());
+            return;
+        }
+
         BuildJobState state = jobs.get(message.jobId());
         if (state == null) {
             LOGGER.debug("Ignoring acknowledgement for unknown job {}", message.jobId());
@@ -253,6 +341,7 @@ public final class BuildJobManager {
             LOGGER.debug("Cleared {} jobs for disconnecting player {}", jobIds.size(), player.getGameProfile().name());
         }
         ServerHandshakeService.removeSession(uuid);
+        RequestSecurityManager.get().clear(uuid);
     }
 
     public BuildJobState getJob(String jobId) {
@@ -478,5 +567,12 @@ public final class BuildJobManager {
             this.level = level;
             this.executor = executor;
         }
+    }
+
+    private String formatSeconds(long millis) {
+        if (millis <= 0L) {
+            return "0";
+        }
+        return String.format(Locale.ROOT, "%.1f", millis / 1000.0);
     }
 }

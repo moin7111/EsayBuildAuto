@@ -12,6 +12,7 @@
   - Computes missing items and replies with success/failure payloads.
 - Event wiring: Level tick + logout listeners, network listeners via mod bus.
 - Region lock management preventing overlapping jobs and informing clients about conflicts.
+- Security guardrails: rate limiting, nonce replay protection, expanded failure feedback.
 
 ## High-Level Verification Checklist
 1. **Networking handshake**
@@ -46,7 +47,6 @@
   - Permission nodes & server commands (force build, cancel, etc.)
   - Audit logging / history (who built what, where)
 - Networking & security
-  - Rate limiting, nonce validation, replay protection
   - Payload version negotiation & compatibility guards
   - Error handling for timeouts, invalid data
 - Persistence & restart resilience

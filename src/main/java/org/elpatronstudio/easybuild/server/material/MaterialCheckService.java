@@ -9,11 +9,13 @@ import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.network.chat.Component;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
 import org.elpatronstudio.easybuild.core.network.EasyBuildPacketSender;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundMaterialCheckResponse;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundMissingMaterials;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundMaterialCheckRequest;
+import org.elpatronstudio.easybuild.server.security.RequestSecurityManager;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -21,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.Locale;
 
 /**
  * Performs material availability checks by scanning linked containers and the player's inventory.
@@ -39,6 +42,40 @@ public final class MaterialCheckService {
 
     public void handle(ServerPlayer player, ServerboundMaterialCheckRequest request) {
         if (player == null) {
+            return;
+        }
+
+        RequestSecurityManager security = RequestSecurityManager.get();
+        long now = System.currentTimeMillis();
+        RequestSecurityManager.RateLimitResult rate = security.checkRateLimit(player.getUUID(), RequestSecurityManager.RequestType.MATERIAL_CHECK, now);
+        if (!rate.allowed()) {
+            String detail = "Materialprüfung zu häufig. Bitte warte " + formatSeconds(rate.retryAfterMs()) + "s.";
+            player.sendSystemMessage(Component.literal("[EasyBuild] " + detail));
+            EasyBuildPacketSender.sendTo(player, new ClientboundMaterialCheckResponse(
+                    request.schematic(),
+                    false,
+                    List.of(),
+                    false,
+                    0L,
+                    ThreadLocalRandom.current().nextLong(),
+                    now
+            ));
+            return;
+        }
+
+        RequestSecurityManager.NonceResult nonceCheck = security.verifyNonce(player.getUUID(), RequestSecurityManager.RequestType.MATERIAL_CHECK, request.nonce());
+        if (!nonceCheck.valid()) {
+            String detail = "Materialprüfung verworfen: " + nonceCheck.reason();
+            player.sendSystemMessage(Component.literal("[EasyBuild] " + detail));
+            EasyBuildPacketSender.sendTo(player, new ClientboundMaterialCheckResponse(
+                    request.schematic(),
+                    false,
+                    List.of(),
+                    false,
+                    0L,
+                    ThreadLocalRandom.current().nextLong(),
+                    now
+            ));
             return;
         }
 
@@ -129,5 +166,12 @@ public final class MaterialCheckService {
     }
 
     public record MaterialCheckResult(boolean ok, List<MaterialStack> missing) {
+    }
+
+    private String formatSeconds(long millis) {
+        if (millis <= 0L) {
+            return "0";
+        }
+        return String.format(Locale.ROOT, "%.1f", millis / 1000.0);
     }
 }

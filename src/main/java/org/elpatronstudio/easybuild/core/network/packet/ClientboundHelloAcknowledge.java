@@ -5,6 +5,8 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
+import org.elpatronstudio.easybuild.client.ClientHandshakeState;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.List;
@@ -62,6 +64,11 @@ public record ClientboundHelloAcknowledge(
 
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
-        // TODO: store server capabilities and notify client controllers of connected state.
+        ClientHandshakeState.get().recordSuccess(protocolVersion, serverVersion, serverCapabilities, configHash, nonce, serverTime);
+        if (minecraft.player != null) {
+            String capabilitySummary = serverCapabilities.isEmpty() ? "keine zusätzlichen" : String.join(", ", serverCapabilities);
+            minecraft.player.displayClientMessage(Component.literal("[EasyBuild] Handshake ok – Server " + serverVersion
+                    + " (Protokoll " + protocolVersion + ") – Features: " + capabilitySummary + "."), false);
+        }
     }
 }

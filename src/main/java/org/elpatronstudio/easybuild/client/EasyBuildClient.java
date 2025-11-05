@@ -13,6 +13,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.elpatronstudio.easybuild.client.autobuild.ClientPlacementController;
@@ -82,6 +83,11 @@ public final class EasyBuildClient {
         while (REMOVE_CHEST_KEY.consumeClick()) {
             handleChestRegistration(false);
         }
+    }
+
+    @SubscribeEvent
+    public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
+        ClientHandshakeState.get().clear();
     }
 
     private static void toggleAutoBuild() {

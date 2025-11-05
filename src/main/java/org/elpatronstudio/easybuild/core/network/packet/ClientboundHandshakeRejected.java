@@ -5,6 +5,8 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
+import org.elpatronstudio.easybuild.client.ClientHandshakeState;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.Objects;
@@ -50,6 +52,13 @@ public record ClientboundHandshakeRejected(
 
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
-        // TODO: show error to user and disable server-backed features.
+        ClientHandshakeState.get().recordFailure(reason, requiredProtocol);
+        if (minecraft.player != null) {
+            String required = requiredProtocol == null || requiredProtocol.isBlank()
+                    ? EasyBuildNetwork.supportedProtocolSummary()
+                    : requiredProtocol;
+            minecraft.player.displayClientMessage(Component.literal("[EasyBuild] Handshake fehlgeschlagen: " + reason
+                    + " (erforderliches Protokoll: " + required + ")"), true);
+        }
     }
 }

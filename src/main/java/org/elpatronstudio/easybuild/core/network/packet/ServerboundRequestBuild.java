@@ -4,6 +4,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonSyntaxException;
+import com.mojang.logging.LogUtils;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -17,6 +19,8 @@ import org.elpatronstudio.easybuild.server.job.BuildJobManager;
 
 import java.util.Objects;
 import java.util.UUID;
+
+import org.slf4j.Logger;
 
 /**
  * Client → Server packet requesting the server to execute a build job.
@@ -35,6 +39,7 @@ public record ServerboundRequestBuild(
     public static final Type<ServerboundRequestBuild> TYPE = new Type<>(ID);
     public static final StreamCodec<RegistryFriendlyByteBuf, ServerboundRequestBuild> STREAM_CODEC =
             StreamCodec.of(ServerboundRequestBuild::write, ServerboundRequestBuild::read);
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
     public ServerboundRequestBuild {
@@ -63,7 +68,14 @@ public record ServerboundRequestBuild(
         SchematicRef schematic = FriendlyByteBufUtil.readSchematicRef(buf);
         AnchorPos anchor = FriendlyByteBufUtil.readAnchor(buf);
         PasteMode mode = buf.readEnum(PasteMode.class);
-        JsonObject options = JsonParser.parseString(buf.readUtf()).getAsJsonObject();
+        String optionsJson = buf.readUtf();
+        JsonObject options;
+        try {
+            options = JsonParser.parseString(optionsJson).getAsJsonObject();
+        } catch (IllegalStateException | JsonSyntaxException ex) {
+            LOGGER.warn("Failed to parse build options payload: {}", ex.getMessage());
+            options = new JsonObject();
+        }
         String requestId = buf.readUtf();
         long nonce = buf.readLong();
         return new ServerboundRequestBuild(playerUuid, schematic, anchor, mode, options, requestId, nonce);

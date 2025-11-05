@@ -21,12 +21,16 @@ import net.neoforged.neoforge.client.network.event.RegisterClientPayloadHandlers
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
+import java.util.Optional;
+
 /**
  * Handles payload registration for EasyBuild's networking.
  */
 public final class EasyBuildNetwork {
 
     public static final String PROTOCOL_VERSION = "1";
+    private static final ProtocolVersion SERVER_PROTOCOL = ProtocolVersion.parse(PROTOCOL_VERSION);
+    private static final ProtocolVersion MIN_SUPPORTED_PROTOCOL = SERVER_PROTOCOL; // adjust when backwards compatibility appears
 
     private EasyBuildNetwork() {
     }
@@ -74,5 +78,50 @@ public final class EasyBuildNetwork {
 
     public static ResourceLocation payloadId(String path) {
         return ResourceLocation.fromNamespaceAndPath(Esaybuildauto.MODID, path);
+    }
+
+    public static ProtocolNegotiationResult negotiateProtocol(String clientVersionRaw) {
+        if (clientVersionRaw == null || clientVersionRaw.isBlank()) {
+            return ProtocolNegotiationResult.error("Protokollversion fehlt");
+        }
+        final ProtocolVersion clientVersion;
+        try {
+            clientVersion = ProtocolVersion.parse(clientVersionRaw);
+        } catch (IllegalArgumentException ex) {
+            return ProtocolNegotiationResult.error("Ungültige Versionszeichenkette: " + clientVersionRaw);
+        }
+
+        if (!clientVersion.isCompatibleWith(SERVER_PROTOCOL)) {
+            return ProtocolNegotiationResult.error("Nicht kompatible Hauptversion " + clientVersion.major() + ". Unterstützt: " + supportedProtocolSummary());
+        }
+
+        if (clientVersion.compareTo(MIN_SUPPORTED_PROTOCOL) < 0) {
+            return ProtocolNegotiationResult.error("Clientversion zu alt (" + clientVersion.canonical() + "). Mindestversion: " + MIN_SUPPORTED_PROTOCOL.canonical());
+        }
+
+        return ProtocolNegotiationResult.success(SERVER_PROTOCOL);
+    }
+
+    public static String supportedProtocolSummary() {
+        return SERVER_PROTOCOL.major() + ".x";
+    }
+
+    public static ProtocolVersion currentProtocol() {
+        return SERVER_PROTOCOL;
+    }
+
+    public record ProtocolNegotiationResult(boolean compatible, ProtocolVersion negotiated, String error) {
+
+        private static ProtocolNegotiationResult success(ProtocolVersion negotiated) {
+            return new ProtocolNegotiationResult(true, negotiated, "");
+        }
+
+        private static ProtocolNegotiationResult error(String reason) {
+            return new ProtocolNegotiationResult(false, null, reason);
+        }
+
+        public Optional<ProtocolVersion> negotiatedVersion() {
+            return Optional.ofNullable(negotiated);
+        }
     }
 }

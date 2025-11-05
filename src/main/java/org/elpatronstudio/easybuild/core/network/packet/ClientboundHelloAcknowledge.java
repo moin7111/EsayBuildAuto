@@ -5,6 +5,8 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
+import org.elpatronstudio.easybuild.client.ClientHandshakeState;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.List;
@@ -62,6 +64,16 @@ public record ClientboundHelloAcknowledge(
 
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
-        // TODO: store server capabilities and notify client controllers of connected state.
+        ClientHandshakeState.get().recordSuccess(protocolVersion, serverVersion, serverCapabilities, configHash, nonce, serverTime);
+        if (minecraft.player != null) {
+            String capabilitySummary = serverCapabilities.isEmpty() ? "none" : String.join(", ", serverCapabilities);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.handshake.ok", serverVersion, protocolVersion, capabilitySummary), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.header"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line1"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line2"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line3"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line4"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line5"), false);
+        }
     }
 }

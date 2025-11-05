@@ -50,6 +50,6 @@ public record ServerboundCancelBuildRequest(
     }
 
     public void handle(ServerPlayer player) {
-        BuildJobManager.get().cancelJob(player, jobId);
+        BuildJobManager.get().cancelJob(player, this);
     }
 }

@@ -8,9 +8,11 @@ import java.util.List;
 public final class BlockPlacementPlan {
 
     private final List<BlockPlacement> placements;
+    private final BlockRegion region;
 
-    public BlockPlacementPlan(List<BlockPlacement> placements) {
+    public BlockPlacementPlan(List<BlockPlacement> placements, BlockRegion region) {
         this.placements = List.copyOf(placements);
+        this.region = region;
     }
 
     public List<BlockPlacement> placements() {
@@ -23,5 +25,9 @@ public final class BlockPlacementPlan {
 
     public boolean isEmpty() {
         return placements.isEmpty();
+    }
+
+    public BlockRegion region() {
+        return region;
     }
 }

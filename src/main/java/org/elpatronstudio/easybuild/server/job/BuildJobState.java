@@ -17,6 +17,7 @@ public final class BuildJobState {
     private final AtomicInteger total = new AtomicInteger();
     private volatile JobPhase phase = JobPhase.QUEUED;
     private volatile BlockPlacementPlan plan;
+    private volatile RegionLockManager.RegionLock regionLock;
 
     public BuildJobState(BuildJob job, UUID reservationToken) {
         this.job = Objects.requireNonNull(job, "job");
@@ -59,5 +60,13 @@ public final class BuildJobState {
 
     public void attachPlan(BlockPlacementPlan plan) {
         this.plan = plan;
+    }
+
+    public RegionLockManager.RegionLock regionLock() {
+        return regionLock;
+    }
+
+    public void attachRegionLock(RegionLockManager.RegionLock lock) {
+        this.regionLock = lock;
     }
 }

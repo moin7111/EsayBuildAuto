@@ -11,6 +11,9 @@
   - Aggregates player inventory + linked containers
   - Computes missing items and replies with success/failure payloads.
 - Event wiring: Level tick + logout listeners, network listeners via mod bus.
+- Region lock management preventing overlapping jobs and informing clients about conflicts.
+- Security guardrails: rate limiting, nonce replay protection, expanded failure feedback.
+- Protocol negotiation with compatibility guards and detailed handshake rejections.
 
 ## High-Level Verification Checklist
 1. **Networking handshake**
@@ -35,7 +38,7 @@
 ## Remaining Implementation Tasks
 - Real block placing pipeline
   - Step/Simulated/Atomic paste modes
-  - Region locking and rollback/resume mechanics
+  - Rollback/resume mechanics
   - Item reservation & consumption (persisted across restarts)
 - Client experience
   - UI for server mode, material deficits, job progress, errors
@@ -44,10 +47,6 @@
   - Config files & reload handling
   - Permission nodes & server commands (force build, cancel, etc.)
   - Audit logging / history (who built what, where)
-- Networking & security
-  - Rate limiting, nonce validation, replay protection
-  - Payload version negotiation & compatibility guards
-  - Error handling for timeouts, invalid data
 - Persistence & restart resilience
   - Store queued jobs, reservations, logs in data files/DB
   - Reload state on server start, resume jobs safely

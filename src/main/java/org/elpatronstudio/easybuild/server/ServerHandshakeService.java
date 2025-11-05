@@ -1,17 +1,22 @@
 package org.elpatronstudio.easybuild.server;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork.ProtocolNegotiationResult;
 import org.elpatronstudio.easybuild.core.network.EasyBuildPacketSender;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundHandshakeRejected;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundHelloAcknowledge;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundHelloHandshake;
+import org.elpatronstudio.easybuild.server.security.RequestSecurityManager;
+import org.slf4j.Logger;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
@@ -21,6 +26,7 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public final class ServerHandshakeService {
 
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<UUID, HandshakeSession> SESSIONS = new ConcurrentHashMap<>();
 
     private ServerHandshakeService() {
@@ -31,16 +37,35 @@ public final class ServerHandshakeService {
             return;
         }
 
-        if (!EasyBuildNetwork.PROTOCOL_VERSION.equals(message.protocolVersion())) {
-            EasyBuildPacketSender.sendTo(player, new ClientboundHandshakeRejected(
-                    "Protocol mismatch",
-                    EasyBuildNetwork.PROTOCOL_VERSION,
-                    System.currentTimeMillis()
-            ));
-            player.sendSystemMessage(Component.literal("[EasyBuild] Netzwerk-Version nicht kompatibel (Server: "
-                    + EasyBuildNetwork.PROTOCOL_VERSION + ", Client: " + message.protocolVersion() + ")"));
+        if (!player.getUUID().equals(message.playerUuid())) {
+            reject(player, "Identity mismatch", "HANDSHAKE_IDENTITY_MISMATCH");
             return;
         }
+
+        long now = System.currentTimeMillis();
+        RequestSecurityManager security = RequestSecurityManager.get();
+        RequestSecurityManager.RateLimitResult rate = security.checkRateLimit(player.getUUID(), RequestSecurityManager.RequestType.HANDSHAKE, now);
+        if (!rate.allowed()) {
+            reject(player, "Rate limited (versuche es in " + formatSeconds(rate.retryAfterMs()) + "s erneut)", "HANDSHAKE_RATE_LIMIT");
+            return;
+        }
+
+        RequestSecurityManager.NonceResult nonce = security.verifyNonce(player.getUUID(), RequestSecurityManager.RequestType.HANDSHAKE, message.nonce());
+        if (!nonce.valid()) {
+            reject(player, "Ungültiger Handshake-Nonce: " + nonce.reason(), "HANDSHAKE_REPLAY");
+            return;
+        }
+
+        ProtocolNegotiationResult negotiation = EasyBuildNetwork.negotiateProtocol(message.protocolVersion());
+        if (!negotiation.compatible()) {
+            String detail = negotiation.error() + " (Client: " + message.protocolVersion() + ", Server: " + EasyBuildNetwork.supportedProtocolSummary() + ")";
+            reject(player, detail, "HANDSHAKE_PROTOCOL_INCOMPATIBLE");
+            return;
+        }
+
+        String negotiatedProtocol = negotiation.negotiatedVersion()
+                .map(version -> version.canonical())
+                .orElse(EasyBuildNetwork.currentProtocol().canonical());
 
         long serverNonce = ThreadLocalRandom.current().nextLong();
         HandshakeSession session = new HandshakeSession(
@@ -48,12 +73,13 @@ public final class ServerHandshakeService {
                 message.clientVersion(),
                 Set.copyOf(message.clientCapabilities()),
                 message.nonce(),
-                serverNonce
+                serverNonce,
+                negotiatedProtocol
         );
         SESSIONS.put(player.getUUID(), session);
 
         EasyBuildPacketSender.sendTo(player, new ClientboundHelloAcknowledge(
-                EasyBuildNetwork.PROTOCOL_VERSION,
+                negotiatedProtocol,
                 getServerVersion(),
                 serverCapabilities(),
                 currentConfigHash(),
@@ -61,8 +87,22 @@ public final class ServerHandshakeService {
                 System.currentTimeMillis()
         ));
 
-        player.sendSystemMessage(Component.literal("[EasyBuild] Handshake abgeschlossen (Version "
-                + EasyBuildNetwork.PROTOCOL_VERSION + ")"));
+        player.sendSystemMessage(Component.literal("[EasyBuild] Handshake abgeschlossen (Protokoll "
+                + negotiatedProtocol + ")"));
+    }
+
+    private static void reject(ServerPlayer player, String detail, String logCode) {
+        long now = System.currentTimeMillis();
+        EasyBuildPacketSender.sendTo(player, new ClientboundHandshakeRejected(detail, EasyBuildNetwork.currentProtocol().canonical(), now));
+        player.sendSystemMessage(Component.literal("[EasyBuild] Handshake fehlgeschlagen: " + detail));
+        LOGGER.debug("Handshake rejected for {} ({}): {}", player.getGameProfile().name(), logCode, detail);
+    }
+
+    private static String formatSeconds(long millis) {
+        if (millis <= 0L) {
+            return "0";
+        }
+        return String.format(Locale.ROOT, "%.1f", millis / 1000.0);
     }
 
     public static HandshakeSession getSession(UUID uuid) {
@@ -92,6 +132,7 @@ public final class ServerHandshakeService {
                                    String clientVersion,
                                    Set<String> clientCapabilities,
                                    long clientNonce,
-                                   long serverNonce) {
+                                   long serverNonce,
+                                   String negotiatedProtocol) {
     }
 }

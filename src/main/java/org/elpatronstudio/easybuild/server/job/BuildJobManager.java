@@ -14,9 +14,12 @@ import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildAccepted
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildCompleted;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildFailed;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundProgressUpdate;
+import org.elpatronstudio.easybuild.core.network.packet.ClientboundRegionLocked;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundAcknowledgeStatus;
+import org.elpatronstudio.easybuild.core.network.packet.ServerboundCancelBuildRequest;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundRequestBuild;
 import org.elpatronstudio.easybuild.server.ServerHandshakeService;
+import org.elpatronstudio.easybuild.server.security.RequestSecurityManager;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -27,6 +30,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.Locale;
 
 /**
  * Coordinates server-side build job lifecycle.
@@ -35,6 +39,7 @@ public final class BuildJobManager {
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final BuildJobManager INSTANCE = new BuildJobManager();
+    private static final int MAX_STALLED_TICKS = 200;
 
     private final Map<String, BuildJobState> jobs = new ConcurrentHashMap<>();
     private final Map<UUID, Set<String>> playerJobs = new ConcurrentHashMap<>();
@@ -67,6 +72,42 @@ public final class BuildJobManager {
         }
 
         String jobId = JobIdGenerator.nextId();
+
+        RequestSecurityManager security = RequestSecurityManager.get();
+        long nowTs = System.currentTimeMillis();
+        RequestSecurityManager.RateLimitResult rate = security.checkRateLimit(player.getUUID(), RequestSecurityManager.RequestType.BUILD_REQUEST, nowTs);
+        if (!rate.allowed()) {
+            String wait = formatSeconds(rate.retryAfterMs());
+            String detail = "Zu viele Build-Anfragen für Request " + message.requestId() + ". Bitte warte " + wait + "s.";
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    jobId,
+                    "RATE_LIMITED",
+                    detail,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    nowTs
+            ));
+            sendChat(player, Component.literal("[EasyBuild] " + detail));
+            LOGGER.debug("Rate limit triggered for build request by {} (retry in {}s)", player.getGameProfile().name(), wait);
+            return;
+        }
+
+        RequestSecurityManager.NonceResult nonceCheck = security.verifyNonce(player.getUUID(), RequestSecurityManager.RequestType.BUILD_REQUEST, message.nonce());
+        if (!nonceCheck.valid()) {
+            String detail = "Anfrage verworfen (" + message.requestId() + "): " + nonceCheck.reason();
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    jobId,
+                    "INVALID_NONCE",
+                    detail,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    nowTs
+            ));
+            sendChat(player, Component.literal("[EasyBuild] " + detail));
+            LOGGER.debug("Rejected build request from {} due to nonce issue: {}", player.getGameProfile().name(), nonceCheck.reason());
+            return;
+        }
+
         BuildJob job = new BuildJob(
                 jobId,
                 player.getUUID(),
@@ -120,15 +161,57 @@ public final class BuildJobManager {
             return;
         }
 
+        ResourceKey<Level> dimensionKey = BlockPlacementPlanner.resolveDimensionKey(job.anchor());
+        long estimatedTicks = estimateDurationTicks(job, plan);
+        RegionLockManager.LockResult lockResult = RegionLockManager.get().tryAcquire(
+                dimensionKey,
+                plan.region(),
+                player.getUUID(),
+                player.getGameProfile().name(),
+                job.jobId(),
+                estimatedTicks
+        );
+
+        if (!lockResult.success()) {
+            RegionLockManager.RegionLock conflict = lockResult.conflict();
+            String lockDetails = "Region wird aktuell von einem anderen Job genutzt.";
+            if (conflict != null) {
+                long etaTicks = estimateRemainingTicks(conflict);
+                EasyBuildPacketSender.sendTo(player, new ClientboundRegionLocked(
+                        job.schematic(),
+                        conflict.jobId(),
+                        conflict.ownerUuid(),
+                        conflict.ownerName(),
+                        etaTicks,
+                        ThreadLocalRandom.current().nextLong(),
+                        System.currentTimeMillis()
+                ));
+                sendChat(player, Component.literal("[EasyBuild] Region durch Job " + conflict.jobId() + " gesperrt (" + conflict.ownerName() + ")."));
+                lockDetails = "Region ist durch Job " + conflict.jobId() + " gesperrt.";
+            }
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    job.jobId(),
+                    "REGION_LOCKED",
+                    lockDetails,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    System.currentTimeMillis()
+            ));
+            LOGGER.debug("Rejected job {} due to region lock conflict.", job.jobId());
+            return;
+        }
+
+        RegionLockManager.RegionLock regionLock = lockResult.acquired();
+
         BuildJobState state = new BuildJobState(job, UUID.randomUUID());
         state.attachPlan(plan);
         state.updateProgress(0, plan.totalBlocks(), JobPhase.QUEUED);
+        state.attachRegionLock(regionLock);
 
         jobs.put(jobId, state);
         playerJobs.computeIfAbsent(player.getUUID(), uuid -> ConcurrentHashMap.newKeySet()).add(jobId);
         jobQueue.add(state);
 
-        long estimatedTicks = estimateDurationTicks(job, plan);
         long now = System.currentTimeMillis();
         EasyBuildPacketSender.sendTo(player, new ClientboundBuildAccepted(
                 job.jobId(),
@@ -144,8 +227,43 @@ public final class BuildJobManager {
         LOGGER.debug("Queued EasyBuild job {} for player {} ({} blocks)", job.jobId(), player.getGameProfile().name(), plan.totalBlocks());
     }
 
-    public void cancelJob(ServerPlayer player, String jobId) {
+    public void cancelJob(ServerPlayer player, ServerboundCancelBuildRequest message) {
         if (player == null) {
+            return;
+        }
+
+        RequestSecurityManager security = RequestSecurityManager.get();
+        long now = System.currentTimeMillis();
+        RequestSecurityManager.RateLimitResult rate = security.checkRateLimit(player.getUUID(), RequestSecurityManager.RequestType.CANCEL_REQUEST, now);
+        String jobId = message.jobId();
+        if (!rate.allowed()) {
+            String detail = "Zu viele Abbruch-Anfragen für Job " + jobId + ". Bitte warte " + formatSeconds(rate.retryAfterMs()) + "s.";
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    jobId,
+                    "RATE_LIMITED",
+                    detail,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    now
+            ));
+            sendChat(player, Component.literal("[EasyBuild] " + detail));
+            LOGGER.debug("Rate limit triggered for cancel request by {} (job {})", player.getGameProfile().name(), jobId);
+            return;
+        }
+
+        RequestSecurityManager.NonceResult nonceCheck = security.verifyNonce(player.getUUID(), RequestSecurityManager.RequestType.CANCEL_REQUEST, message.nonce());
+        if (!nonceCheck.valid()) {
+            String detail = "Abbruch verworfen (Job " + jobId + "): " + nonceCheck.reason();
+            EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                    jobId,
+                    "INVALID_NONCE",
+                    detail,
+                    false,
+                    ThreadLocalRandom.current().nextLong(),
+                    now
+            ));
+            sendChat(player, Component.literal("[EasyBuild] " + detail));
+            LOGGER.debug("Rejected cancel request from {} due to nonce issue (job {}): {}", player.getGameProfile().name(), jobId, nonceCheck.reason());
             return;
         }
 
@@ -186,6 +304,20 @@ public final class BuildJobManager {
             return;
         }
 
+        RequestSecurityManager security = RequestSecurityManager.get();
+        long now = System.currentTimeMillis();
+        RequestSecurityManager.RateLimitResult rate = security.checkRateLimit(player.getUUID(), RequestSecurityManager.RequestType.STATUS_ACK, now);
+        if (!rate.allowed()) {
+            LOGGER.debug("Dropping status ACK from {} due to rate limit", player.getGameProfile().name());
+            return;
+        }
+
+        RequestSecurityManager.NonceResult nonceCheck = security.verifyNonce(player.getUUID(), RequestSecurityManager.RequestType.STATUS_ACK, message.nonce());
+        if (!nonceCheck.valid()) {
+            LOGGER.debug("Dropping status ACK from {} due to nonce issue: {}", player.getGameProfile().name(), nonceCheck.reason());
+            return;
+        }
+
         BuildJobState state = jobs.get(message.jobId());
         if (state == null) {
             LOGGER.debug("Ignoring acknowledgement for unknown job {}", message.jobId());
@@ -210,6 +342,7 @@ public final class BuildJobManager {
             LOGGER.debug("Cleared {} jobs for disconnecting player {}", jobIds.size(), player.getGameProfile().name());
         }
         ServerHandshakeService.removeSession(uuid);
+        RequestSecurityManager.get().clear(uuid);
     }
 
     public BuildJobState getJob(String jobId) {
@@ -222,6 +355,8 @@ public final class BuildJobManager {
         if (currentJob != null && currentJob.state == state) {
             currentJob = null;
         }
+        RegionLockManager.get().release(state.regionLock());
+        state.attachRegionLock(null);
         Set<String> owned = playerJobs.get(state.job().ownerUuid());
         if (owned != null) {
             owned.remove(state.job().jobId());
@@ -351,6 +486,23 @@ public final class BuildJobManager {
                         ThreadLocalRandom.current().nextLong(),
                         System.currentTimeMillis()
                 ));
+                if (!finished) {
+                    if (placed > active.lastPlaced) {
+                        active.lastPlaced = placed;
+                        active.stalledTicks = 0;
+                    } else {
+                        active.stalledTicks++;
+                        if (active.stalledTicks > MAX_STALLED_TICKS) {
+                            LOGGER.warn("Job {} timed out after {} stalled ticks", active.state.job().jobId(), active.stalledTicks);
+                            failJob(active.level, active.state, "TIMEOUT", "Keine Fortschritts-Updates innerhalb des Zeitlimits.", false);
+                            currentJob = null;
+                            return;
+                        }
+                    }
+                } else {
+                    active.lastPlaced = placed;
+                }
+
                 if (finished) {
                     completeJob(active.level, active.state, active.executor);
                     currentJob = null;
@@ -395,6 +547,19 @@ public final class BuildJobManager {
         sendChatToOwner(level, state, Component.literal("[EasyBuild] Job " + state.job().jobId() + " fehlgeschlagen: " + safeDetails));
     }
 
+    private long estimateRemainingTicks(RegionLockManager.RegionLock lock) {
+        if (lock == null) {
+            return 0L;
+        }
+        long elapsedMs = System.currentTimeMillis() - lock.lockedAt();
+        long elapsedTicks = Math.max(0L, elapsedMs / 50L);
+        long remaining = lock.estimatedTicks() - elapsedTicks;
+        if (remaining == Long.MIN_VALUE || remaining == Long.MAX_VALUE) {
+            return lock.estimatedTicks();
+        }
+        return Math.max(1L, remaining);
+    }
+
     private void sendChatToOwner(ServerLevel level, BuildJobState state, Component message) {
         Optional.ofNullable(level.getServer().getPlayerList().getPlayer(state.job().ownerUuid()))
                 .ifPresent(player -> sendChat(player, message));
@@ -414,11 +579,22 @@ public final class BuildJobManager {
         private final BuildJobState state;
         private final ServerLevel level;
         private final BlockPlacementExecutor executor;
+        private int stalledTicks;
+        private int lastPlaced;
 
         private ActiveJob(BuildJobState state, ServerLevel level, BlockPlacementExecutor executor) {
             this.state = state;
             this.level = level;
             this.executor = executor;
+            this.lastPlaced = executor.placedBlocks();
+            this.stalledTicks = 0;
         }
+    }
+
+    private String formatSeconds(long millis) {
+        if (millis <= 0L) {
+            return "0";
+        }
+        return String.format(Locale.ROOT, "%.1f", millis / 1000.0);
     }
 }

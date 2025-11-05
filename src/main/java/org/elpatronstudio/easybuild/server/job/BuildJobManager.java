@@ -20,6 +20,7 @@ import org.elpatronstudio.easybuild.core.network.packet.ServerboundAcknowledgeSt
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundCancelBuildRequest;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundRequestBuild;
 import org.elpatronstudio.easybuild.server.ServerHandshakeService;
+import org.elpatronstudio.easybuild.server.security.InstaBuildPermissionService;
 import org.elpatronstudio.easybuild.server.security.RequestSecurityManager;
 import org.slf4j.Logger;
 
@@ -113,6 +114,28 @@ public final class BuildJobManager {
             sendChat(player, Component.literal("[EasyBuild] " + detail));
             LOGGER.debug("Rejected build request from {} due to nonce issue: {}", player.getGameProfile().name(), nonceCheck.reason());
             return;
+        }
+
+        if (message.mode() == PasteMode.ATOMIC) {
+            InstaBuildPermissionService.PermissionResult permission = InstaBuildPermissionService.get().check(player, message);
+            if (!permission.allowed()) {
+                String reason = permission.reason() == null || permission.reason().isBlank()
+                        ? "Keine Berechtigung für Insta-Build."
+                        : permission.reason();
+                String detail = "Insta-Build verweigert: " + reason;
+                EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
+                        jobId,
+                        message.schematic(),
+                        message.requestId(),
+                        "PERMISSION_DENIED",
+                        detail,
+                        false,
+                        ThreadLocalRandom.current().nextLong(),
+                        System.currentTimeMillis()
+                ));
+                sendChat(player, Component.literal("[EasyBuild] " + detail));
+                return;
+            }
         }
 
         BuildJob job = new BuildJob(

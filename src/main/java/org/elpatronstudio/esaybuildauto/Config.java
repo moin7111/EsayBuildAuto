@@ -7,8 +7,11 @@ import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.ModConfigSpec;
 import org.elpatronstudio.easybuild.core.model.PasteMode;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 // An example config class. This is not required, but it's a good idea to have one to keep your config organized.
@@ -53,6 +56,34 @@ public class Config {
             .comment("Maximum number of nearby containers to register for client auto building.")
             .defineInRange("client.chestMaxTargets", 8, 0, 32);
 
+    private static final ModConfigSpec.BooleanValue SERVER_INSTA_BUILD_ENABLED = BUILDER
+            .comment("Enable server-side Insta-Build requests.")
+            .define("server.instaBuild.enabled", true);
+
+    private static final ModConfigSpec.BooleanValue SERVER_INSTA_BUILD_REQUIRE_WHITELIST = BUILDER
+            .comment("Require Insta-Build users to be explicitly whitelisted (otherwise operator permission level or role membership suffices).")
+            .define("server.instaBuild.requireWhitelist", false);
+
+    private static final ModConfigSpec.IntValue SERVER_INSTA_BUILD_MIN_PERMISSION_LEVEL = BUILDER
+            .comment("Minimum vanilla permission level required for Insta-Build (0-4). Use 0 to disable the permission level requirement.")
+            .defineInRange("server.instaBuild.minPermissionLevel", 2, 0, 4);
+
+    private static final ModConfigSpec.ConfigValue<List<? extends String>> SERVER_INSTA_BUILD_PLAYER_WHITELIST = BUILDER
+            .comment("List of player names or UUIDs allowed to use Insta-Build regardless of permission level.")
+            .defineListAllowEmpty("server.instaBuild.playerWhitelist", List.of(), Config::validatePlayerIdentifier);
+
+    private static final ModConfigSpec.ConfigValue<List<? extends String>> SERVER_INSTA_BUILD_ALLOWED_TEAMS = BUILDER
+            .comment("Scoreboard team names whose members may use Insta-Build.")
+            .defineListAllowEmpty("server.instaBuild.allowedTeams", List.of(), Config::validateRoleIdentifier);
+
+    private static final ModConfigSpec.ConfigValue<List<? extends String>> SERVER_INSTA_BUILD_ALLOWED_TAGS = BUILDER
+            .comment("Entity tags that grant Insta-Build access when present on the player (via /tag).")
+            .defineListAllowEmpty("server.instaBuild.allowedTags", List.of(), Config::validateRoleIdentifier);
+
+    private static final ModConfigSpec.BooleanValue SERVER_INSTA_BUILD_AUDIT_LOG = BUILDER
+            .comment("Write Insta-Build permission decisions to easybuild/insta_build_audit.log inside the world save.")
+            .define("server.instaBuild.auditLog", true);
+
     static final ModConfigSpec SPEC = BUILDER.build();
 
     public static boolean logDirtBlock;
@@ -66,6 +97,14 @@ public class Config {
     public static int clientBlocksPerTick;
     public static int clientChestSearchRadius;
     public static int clientChestMaxTargets;
+    public static boolean serverInstaBuildEnabled;
+    public static boolean serverInstaBuildRequireWhitelist;
+    public static int serverInstaBuildMinPermissionLevel;
+    public static Set<UUID> serverInstaBuildPlayerWhitelistUuids = Set.of();
+    public static Set<String> serverInstaBuildPlayerWhitelistNames = Set.of();
+    public static Set<String> serverInstaBuildAllowedTeams = Set.of();
+    public static Set<String> serverInstaBuildAllowedTags = Set.of();
+    public static boolean serverInstaBuildAuditLog;
 
     private static boolean validateItemName(final Object obj) {
         return obj instanceof String itemName && BuiltInRegistries.ITEM.containsKey(ResourceLocation.parse(itemName));
@@ -86,5 +125,74 @@ public class Config {
         clientBlocksPerTick = CLIENT_AUTOBUILD_BLOCKS_PER_TICK.get();
         clientChestSearchRadius = CLIENT_CHEST_SEARCH_RADIUS.get();
         clientChestMaxTargets = CLIENT_CHEST_MAX_TARGETS.get();
+
+        serverInstaBuildEnabled = SERVER_INSTA_BUILD_ENABLED.get();
+        serverInstaBuildRequireWhitelist = SERVER_INSTA_BUILD_REQUIRE_WHITELIST.get();
+        serverInstaBuildMinPermissionLevel = SERVER_INSTA_BUILD_MIN_PERMISSION_LEVEL.get();
+        serverInstaBuildPlayerWhitelistUuids = SERVER_INSTA_BUILD_PLAYER_WHITELIST.get().stream()
+                .map(String::trim)
+                .filter(entry -> !entry.isEmpty())
+                .map(Config::parseUuidOrNull)
+                .filter(uuid -> uuid != null)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        serverInstaBuildPlayerWhitelistNames = SERVER_INSTA_BUILD_PLAYER_WHITELIST.get().stream()
+                .map(String::trim)
+                .filter(entry -> !entry.isEmpty())
+                .filter(entry -> !isUuid(entry))
+                .map(entry -> entry.toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        serverInstaBuildAllowedTeams = SERVER_INSTA_BUILD_ALLOWED_TEAMS.get().stream()
+                .map(String::trim)
+                .filter(entry -> !entry.isEmpty())
+                .map(entry -> entry.toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        serverInstaBuildAllowedTags = SERVER_INSTA_BUILD_ALLOWED_TAGS.get().stream()
+                .map(String::trim)
+                .filter(entry -> !entry.isEmpty())
+                .map(entry -> entry.toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        serverInstaBuildAuditLog = SERVER_INSTA_BUILD_AUDIT_LOG.get();
+    }
+
+    private static boolean validatePlayerIdentifier(final Object obj) {
+        if (!(obj instanceof String entry)) {
+            return false;
+        }
+        String trimmed = entry.trim();
+        if (trimmed.isEmpty()) {
+            return false;
+        }
+        if (isUuid(trimmed)) {
+            return true;
+        }
+        return trimmed.matches("^[A-Za-z0-9_.-]{3,16}$");
+    }
+
+    private static boolean validateRoleIdentifier(final Object obj) {
+        if (!(obj instanceof String entry)) {
+            return false;
+        }
+        return !entry.trim().isEmpty();
+    }
+
+    private static boolean isUuid(String value) {
+        try {
+            UUID.fromString(value);
+            return true;
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+    }
+
+    private static UUID parseUuidOrNull(String value) {
+        try {
+            return UUID.fromString(value.trim());
+        } catch (Exception ex) {
+            return null;
+        }
     }
 }

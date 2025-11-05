@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import org.elpatronstudio.easybuild.core.model.JobPhase;
 import org.elpatronstudio.easybuild.core.model.PasteMode;
+import org.elpatronstudio.easybuild.core.model.SchematicRef;
 import org.elpatronstudio.easybuild.core.network.EasyBuildPacketSender;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildAccepted;
 import org.elpatronstudio.easybuild.core.network.packet.ClientboundBuildCompleted;
@@ -62,6 +63,8 @@ public final class BuildJobManager {
             sendChat(player, Component.literal("[EasyBuild] Bitte zuerst einen gültigen Handshake abschließen."));
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     message.requestId(),
+                    message.schematic(),
+                    message.requestId(),
                     "HANDSHAKE_REQUIRED",
                     "Handshake required before requesting builds.",
                     false,
@@ -81,6 +84,8 @@ public final class BuildJobManager {
             String detail = "Zu viele Build-Anfragen für Request " + message.requestId() + ". Bitte warte " + wait + "s.";
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     jobId,
+                    message.schematic(),
+                    message.requestId(),
                     "RATE_LIMITED",
                     detail,
                     false,
@@ -97,6 +102,8 @@ public final class BuildJobManager {
             String detail = "Anfrage verworfen (" + message.requestId() + "): " + nonceCheck.reason();
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     jobId,
+                    message.schematic(),
+                    message.requestId(),
                     "INVALID_NONCE",
                     detail,
                     false,
@@ -123,6 +130,8 @@ public final class BuildJobManager {
         if (targetLevel == null) {
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     job.jobId(),
+                    job.schematic(),
+                    job.clientRequestId(),
                     "DIMENSION_UNAVAILABLE",
                     "Ziel-Dimension nicht geladen.",
                     false,
@@ -139,6 +148,8 @@ public final class BuildJobManager {
         } catch (BlockPlacementException ex) {
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     job.jobId(),
+                    job.schematic(),
+                    job.clientRequestId(),
                     ex.reasonCode(),
                     ex.getMessage(),
                     false,
@@ -151,6 +162,8 @@ public final class BuildJobManager {
         } catch (Exception ex) {
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     job.jobId(),
+                    job.schematic(),
+                    job.clientRequestId(),
                     "PLAN_FAILURE",
                     ex.getMessage(),
                     false,
@@ -191,6 +204,8 @@ public final class BuildJobManager {
             }
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     job.jobId(),
+                job.schematic(),
+                job.clientRequestId(),
                     "REGION_LOCKED",
                     lockDetails,
                     false,
@@ -215,7 +230,9 @@ public final class BuildJobManager {
         long now = System.currentTimeMillis();
         EasyBuildPacketSender.sendTo(player, new ClientboundBuildAccepted(
                 job.jobId(),
+                job.schematic(),
                 job.mode(),
+                job.clientRequestId(),
                 estimatedTicks,
                 state.reservationToken(),
                 ThreadLocalRandom.current().nextLong(),
@@ -236,10 +253,15 @@ public final class BuildJobManager {
         long now = System.currentTimeMillis();
         RequestSecurityManager.RateLimitResult rate = security.checkRateLimit(player.getUUID(), RequestSecurityManager.RequestType.CANCEL_REQUEST, now);
         String jobId = message.jobId();
+        BuildJobState knownState = jobs.get(jobId);
+        SchematicRef knownSchematic = knownState != null ? knownState.job().schematic() : SchematicRef.empty();
+        String knownRequestId = knownState != null ? knownState.job().clientRequestId() : jobId;
         if (!rate.allowed()) {
             String detail = "Zu viele Abbruch-Anfragen für Job " + jobId + ". Bitte warte " + formatSeconds(rate.retryAfterMs()) + "s.";
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     jobId,
+                    knownSchematic,
+                    knownRequestId,
                     "RATE_LIMITED",
                     detail,
                     false,
@@ -256,6 +278,8 @@ public final class BuildJobManager {
             String detail = "Abbruch verworfen (Job " + jobId + "): " + nonceCheck.reason();
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     jobId,
+                    knownSchematic,
+                    knownRequestId,
                     "INVALID_NONCE",
                     detail,
                     false,
@@ -272,6 +296,8 @@ public final class BuildJobManager {
             sendChat(player, Component.literal("[EasyBuild] Kein aktiver Job mit ID " + jobId + "."));
             EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                     jobId,
+                    knownSchematic,
+                    knownRequestId,
                     "JOB_NOT_FOUND",
                     "Kein aktiver Job mit dieser ID.",
                     false,
@@ -288,6 +314,8 @@ public final class BuildJobManager {
 
         EasyBuildPacketSender.sendTo(player, new ClientboundBuildFailed(
                 jobId,
+                state.job().schematic(),
+                state.job().clientRequestId(),
                 "CANCELLED",
                 "Job wurde abgebrochen.",
                 false,
@@ -477,15 +505,16 @@ public final class BuildJobManager {
                 int total = active.executor.totalBlocks();
                 JobPhase phase = finished ? JobPhase.COMPLETED : JobPhase.PLACING;
                 publishProgress(active.state, placed, total, phase);
-                EasyBuildPacketSender.sendTo(active.level, active.state.job().ownerUuid(), new ClientboundProgressUpdate(
-                        active.state.job().jobId(),
-                        placed,
-                        total,
-                        phase,
-                        progressMessage(placed, total, finished),
-                        ThreadLocalRandom.current().nextLong(),
-                        System.currentTimeMillis()
-                ));
+                  EasyBuildPacketSender.sendTo(active.level, active.state.job().ownerUuid(), new ClientboundProgressUpdate(
+                          active.state.job().jobId(),
+                          active.state.job().schematic(),
+                          placed,
+                          total,
+                          phase,
+                          progressMessage(placed, total, finished),
+                          ThreadLocalRandom.current().nextLong(),
+                          System.currentTimeMillis()
+                  ));
                 if (!finished) {
                     if (placed > active.lastPlaced) {
                         active.lastPlaced = placed;
@@ -524,6 +553,7 @@ public final class BuildJobManager {
         publishProgress(state, executor.totalBlocks(), executor.totalBlocks(), JobPhase.COMPLETED);
         EasyBuildPacketSender.sendTo(level, state.job().ownerUuid(), new ClientboundBuildCompleted(
                 state.job().jobId(),
+                state.job().schematic(),
                 true,
                 List.of(),
                 "",
@@ -538,6 +568,8 @@ public final class BuildJobManager {
         String safeDetails = (details == null || details.isBlank()) ? "Unbekannter Fehler" : details;
         EasyBuildPacketSender.sendTo(level, state.job().ownerUuid(), new ClientboundBuildFailed(
                 state.job().jobId(),
+                state.job().schematic(),
+                state.job().clientRequestId(),
                 reasonCode,
                 safeDetails,
                 rolledBack,

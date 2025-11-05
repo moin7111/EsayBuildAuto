@@ -2,7 +2,6 @@ package org.elpatronstudio.esaybuildauto;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.food.FoodProperties;
@@ -99,14 +98,9 @@ public class Esaybuildauto {
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
-        // Some common setup code
-        LOGGER.info("HELLO FROM COMMON SETUP");
-
-        if (Config.logDirtBlock) LOGGER.info("DIRT BLOCK >> {}", BuiltInRegistries.BLOCK.getKey(Blocks.DIRT));
-
-        LOGGER.info(Config.magicNumberIntroduction + Config.magicNumber);
-
-        Config.items.forEach((item) -> LOGGER.info("ITEM >> {}", item.toString()));
+        LOGGER.info("EasyBuild common setup complete (clientAutoBuild={}, serverInstaBuild={})",
+                Config.clientAutoBuildEnabled,
+                Config.serverInstaBuildEnabled);
     }
 
     // Add the example block item to the building blocks tab

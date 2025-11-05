@@ -13,9 +13,11 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import org.elpatronstudio.easybuild.client.ClientChestRegistry;
+import org.elpatronstudio.easybuild.client.EasyBuildClient;
 import org.elpatronstudio.easybuild.client.model.SchematicFileEntry;
 import org.elpatronstudio.easybuild.client.schematic.SchematicRepository;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
+import org.elpatronstudio.esaybuildauto.Config;
 import org.elpatronstudio.easybuild.core.model.BuildMode;
 import org.elpatronstudio.easybuild.core.model.JobPhase;
 
@@ -42,6 +44,7 @@ public class SchematicBuilderScreen extends Screen {
     private static final Component RELOAD_BUTTON = Component.translatable("easybuild.gui.reload");
     private static final DateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT);
     private static final DecimalFormat SIZE_FORMAT = new DecimalFormat("#,##0.##");
+    private static final DecimalFormat STEP_FORMAT = new DecimalFormat("#,##0.###");
     private static final int COLOR_TEXT_PRIMARY = 0xE0E0E0;
     private static final int COLOR_TEXT_SECONDARY = 0xA0A0A0;
     private static final int COLOR_STATUS_READY = 0x55FF55;
@@ -58,6 +61,7 @@ public class SchematicBuilderScreen extends Screen {
     private Button reloadButton;
     private int rightPaneLeft;
     private int buttonColumnWidth;
+    private final Tooltip startButtonDefaultTooltip = Tooltip.create(Component.translatable("easybuild.gui.tooltip.start"));
 
     public SchematicBuilderScreen() {
         super(TITLE);
@@ -94,30 +98,37 @@ public class SchematicBuilderScreen extends Screen {
                     updateButtonStates();
                 });
         this.addRenderableWidget(modeButton);
+        this.modeButton.setTooltip(createModeTooltip());
 
         this.chestButton = Button.builder(CHEST_BUTTON, button -> onSelectChests())
                 .bounds(rightPaneLeft, listTop + 28, buttonColumnWidth, 20)
                 .build();
         this.addRenderableWidget(chestButton);
+        this.chestButton.setTooltip(createChestTooltip());
 
         this.materialsButton = Button.builder(MATERIALS_BUTTON, button -> onOpenMaterials())
                 .bounds(rightPaneLeft, listTop + 56, buttonColumnWidth, 20)
                 .build();
         this.addRenderableWidget(materialsButton);
+        this.materialsButton.setTooltip(tooltip("easybuild.gui.tooltip.materials"));
 
         this.reloadButton = Button.builder(RELOAD_BUTTON, button -> reloadSchematics())
                 .bounds(rightPaneLeft, listTop + 84, buttonColumnWidth, 20)
                 .build();
         this.addRenderableWidget(reloadButton);
+        this.reloadButton.setTooltip(tooltip("easybuild.gui.tooltip.reload"));
 
         this.startButton = Button.builder(START_BUTTON, button -> onStart())
                 .bounds(rightPaneLeft, listBottom - 44, buttonColumnWidth, 20)
                 .build();
         this.addRenderableWidget(startButton);
+        this.startButton.setTooltip(this.startButtonDefaultTooltip);
 
-        this.addRenderableWidget(Button.builder(CLOSE_BUTTON, button -> onClose())
+        Button closeButton = Button.builder(CLOSE_BUTTON, button -> onClose())
                 .bounds(rightPaneLeft, listBottom - 20, buttonColumnWidth, 20)
-                .build());
+                .build();
+        closeButton.setTooltip(createCloseTooltip());
+        this.addRenderableWidget(closeButton);
 
         updateButtonStates();
     }
@@ -145,11 +156,40 @@ public class SchematicBuilderScreen extends Screen {
             int missingItems = totalMissingItems(status);
             this.startButton.setTooltip(Tooltip.create(Component.translatable("easybuild.gui.start.tooltip.missing", missingStacks, missingItems)));
         } else {
-            this.startButton.setTooltip(null);
+            this.startButton.setTooltip(this.startButtonDefaultTooltip);
         }
 
         this.materialsButton.active = hasSelection;
         this.chestButton.active = hasSelection;
+    }
+
+    private Tooltip createModeTooltip() {
+        Component base = Component.translatable("easybuild.gui.tooltip.mode");
+        Component scroll = Component.translatable(
+                "easybuild.gui.tooltip.preview_scroll",
+                formatStep(Config.clientPreviewScrollNormalStep),
+                formatStep(Config.clientPreviewScrollFineStep),
+                formatStep(Config.clientPreviewScrollCoarseStep)
+        );
+        return Tooltip.create(Component.empty().append(base).append(Component.literal("\n")).append(scroll));
+    }
+
+    private Tooltip createChestTooltip() {
+        Component keyLabel = EasyBuildClient.exitSelectionKeyLabel();
+        return tooltip("easybuild.gui.tooltip.chests", keyLabel);
+    }
+
+    private Tooltip createCloseTooltip() {
+        Component keyLabel = EasyBuildClient.openGuiKeyLabel();
+        return tooltip("easybuild.gui.tooltip.close", keyLabel);
+    }
+
+    private static Tooltip tooltip(String translationKey, Object... args) {
+        return Tooltip.create(Component.translatable(translationKey, args));
+    }
+
+    private static String formatStep(double value) {
+        return STEP_FORMAT.format(value);
     }
 
     @Override

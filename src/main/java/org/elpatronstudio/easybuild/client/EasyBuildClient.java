@@ -27,6 +27,7 @@ import org.elpatronstudio.easybuild.client.render.SchematicPreviewRenderer;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundHelloHandshake;
+import org.elpatronstudio.esaybuildauto.Config;
 import org.elpatronstudio.esaybuildauto.Esaybuildauto;
 import org.lwjgl.glfw.GLFW;
 
@@ -82,6 +83,14 @@ public final class EasyBuildClient {
                 ClientChestRegistry.load(minecraft.gameDirectory.toPath());
             }
         });
+    }
+
+    public static Component openGuiKeyLabel() {
+        return OPEN_GUI_KEY.getTranslatedKeyMessage();
+    }
+
+    public static Component exitSelectionKeyLabel() {
+        return EXIT_SELECTION_KEY.getTranslatedKeyMessage();
     }
 
     private static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
@@ -183,8 +192,21 @@ public final class EasyBuildClient {
                 || InputConstants.isKeyDown(window, GLFW.GLFW_KEY_RIGHT_SHIFT);
         boolean controlDown = InputConstants.isKeyDown(window, GLFW.GLFW_KEY_LEFT_CONTROL)
                 || InputConstants.isKeyDown(window, GLFW.GLFW_KEY_RIGHT_CONTROL);
-        double step = shiftDown ? 0.25D : (controlDown ? 4.0D : 1.0D);
-        double adjustment = delta > 0.0D ? step : -step;
+
+        double step;
+        if (shiftDown) {
+            step = Config.clientPreviewScrollFineStep;
+        } else if (controlDown) {
+            step = Config.clientPreviewScrollCoarseStep;
+        } else {
+            step = Config.clientPreviewScrollNormalStep;
+        }
+
+        if (step <= 0.0D) {
+            step = 1.0D;
+        }
+
+        double adjustment = Math.copySign(step, delta);
         EasyBuildClientState state = EasyBuildClientState.get();
         state.adjustPreviewForwardOffset(adjustment);
         event.setCanceled(true);
@@ -224,15 +246,15 @@ public final class EasyBuildClient {
 
         GuiGraphics guiGraphics = event.getGuiGraphics();
         Font font = minecraft.font;
-        int width = event.getWindow().getGuiScaledWidth();
-        int height = event.getWindow().getGuiScaledHeight();
+        int width = guiGraphics.guiWidth();
+        int height = guiGraphics.guiHeight();
         int baseY = height - 60;
 
         Component header = Component.literal("EasyBuild – " + job.displayName());
         Component detail = Component.literal(buildHudDetail(job));
 
-        guiGraphics.drawCenteredString(font, header, width / 2, baseY, 0xFFFFFF, false);
-        guiGraphics.drawCenteredString(font, detail, width / 2, baseY + 12, hudColor(job), false);
+        guiGraphics.drawCenteredString(font, header, width / 2, baseY, 0xFFFFFF);
+        guiGraphics.drawCenteredString(font, detail, width / 2, baseY + 12, hudColor(job));
     }
 
 

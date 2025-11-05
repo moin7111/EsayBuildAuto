@@ -149,9 +149,14 @@ public final class EasyBuildClient {
         }
 
         ChestRef ref = new ChestRef(minecraft.level.dimension().location(), pos.immutable());
-        boolean alreadySelected = EasyBuildClientState.get().selectedChests().contains(ref);
-        EasyBuildClientState.get().toggleChest(ref);
-        String key = alreadySelected ? "easybuild.chest_selection.removed" : "easybuild.chest_selection.added";
+        EasyBuildClientState state = EasyBuildClientState.get();
+        boolean added = state.toggleChest(ref);
+        if (added) {
+            ClientChestRegistry.add(minecraft.gameDirectory.toPath(), ref.dimension(), ref.blockPos());
+        } else {
+            ClientChestRegistry.remove(minecraft.gameDirectory.toPath(), ref.dimension(), ref.blockPos());
+        }
+        String key = added ? "easybuild.chest_selection.added" : "easybuild.chest_selection.removed";
         minecraft.player.displayClientMessage(Component.translatable(key, pos.getX(), pos.getY(), pos.getZ()), true);
         return true;
     }

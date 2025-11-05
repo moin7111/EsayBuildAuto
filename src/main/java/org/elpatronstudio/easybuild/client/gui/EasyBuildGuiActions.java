@@ -54,6 +54,16 @@ public final class EasyBuildGuiActions {
             return;
         }
 
+        if (mode != BuildMode.SELF) {
+            EasyBuildClientState.MaterialStatus status = EasyBuildClientState.get().materialStatus(schematic.ref()).orElse(null);
+            if (status != null && !status.ready()) {
+                int missingStacks = status.missing().size();
+                int missingItems = status.missing().stream().mapToInt(stack -> Math.max(0, stack.count())).sum();
+                player.displayClientMessage(Component.translatable("easybuild.build.materials_missing_blocked", missingStacks, missingItems), true);
+                return;
+            }
+        }
+
         switch (mode) {
             case SELF -> startPreview(player, schematic);
             case AUTO -> startClientAutoBuild(player, schematic);

@@ -77,9 +77,6 @@ public class MaterialListScreen extends Screen {
     @Override
     public void tick() {
         super.tick();
-        if (searchBox != null) {
-            searchBox.tick();
-        }
         refreshStatus();
     }
 

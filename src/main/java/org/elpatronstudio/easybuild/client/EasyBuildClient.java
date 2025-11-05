@@ -15,6 +15,7 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.elpatronstudio.easybuild.client.ClientChestRegistry;
 import org.elpatronstudio.easybuild.client.ClientHandshakeState;
+import org.elpatronstudio.easybuild.client.autobuild.ClientPlacementController;
 import org.elpatronstudio.easybuild.client.gui.SchematicBuilderScreen;
 import org.elpatronstudio.easybuild.client.render.ChestSelectionRenderer;
 import org.elpatronstudio.easybuild.client.render.PreviewAnchorRenderer;
@@ -83,6 +84,7 @@ public final class EasyBuildClient {
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
         ensureHandshake();
+        ClientPlacementController.get().tick();
         while (OPEN_GUI_KEY.consumeClick()) {
             openGui();
         }

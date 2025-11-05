@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -36,6 +37,7 @@ public final class EasyBuildClientState {
     private static final int MAX_JOB_HISTORY = 16;
 
     private final List<SchematicFileEntry> availableSchematics = new ArrayList<>();
+    private final Map<String, SchematicFileEntry> schematicsById = new HashMap<>();
     private final Set<ChestRef> selectedChests = new LinkedHashSet<>();
     private final Map<String, MaterialStatus> materialStatuses = new HashMap<>();
     private final LinkedHashMap<String, ClientBuildJob> buildJobs = new LinkedHashMap<>();
@@ -56,6 +58,7 @@ public final class EasyBuildClientState {
 
     public synchronized void reset() {
         availableSchematics.clear();
+        schematicsById.clear();
         selectedSchematic = null;
         buildMode = BuildMode.SELF;
         chestSelectionActive = false;
@@ -69,7 +72,12 @@ public final class EasyBuildClientState {
 
     public synchronized void setAvailableSchematics(List<SchematicFileEntry> entries) {
         availableSchematics.clear();
-        availableSchematics.addAll(entries);
+        schematicsById.clear();
+        for (SchematicFileEntry entry : entries) {
+            availableSchematics.add(entry);
+            schematicsById.put(normalizeId(entry.id()), entry);
+            schematicsById.put(normalizeId(entry.ref().schematicId()), entry);
+        }
         if (selectedSchematic != null && !availableSchematics.contains(selectedSchematic)) {
             selectedSchematic = availableSchematics.isEmpty() ? null : availableSchematics.get(0);
         }
@@ -77,6 +85,33 @@ public final class EasyBuildClientState {
 
     public synchronized List<SchematicFileEntry> availableSchematics() {
         return Collections.unmodifiableList(new ArrayList<>(availableSchematics));
+    }
+
+    public synchronized Optional<SchematicFileEntry> findSchematic(SchematicRef ref) {
+        if (ref == null) {
+            return Optional.empty();
+        }
+        return findSchematic(ref.schematicId());
+    }
+
+    public synchronized Optional<SchematicFileEntry> findSchematic(String schematicId) {
+        if (schematicId == null || schematicId.isBlank()) {
+            return Optional.empty();
+        }
+        String normalized = normalizeId(schematicId);
+        SchematicFileEntry direct = schematicsById.get(normalized);
+        if (direct != null) {
+            return Optional.of(direct);
+        }
+        // Fallback to linear search in case multiple entries share ids with different casing
+        return availableSchematics.stream()
+                .filter(entry -> normalizeId(entry.id()).equals(normalized)
+                        || normalizeId(entry.ref().schematicId()).equals(normalized))
+                .findFirst();
+    }
+
+    private static String normalizeId(String id) {
+        return id == null ? "" : id.replace('\\', '/').toLowerCase(Locale.ROOT);
     }
 
     public synchronized Optional<SchematicFileEntry> selectedSchematic() {

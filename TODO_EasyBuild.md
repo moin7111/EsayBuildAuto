@@ -13,6 +13,7 @@
 - Event wiring: Level tick + logout listeners, network listeners via mod bus.
 - Region lock management preventing overlapping jobs and informing clients about conflicts.
 - Security guardrails: rate limiting, nonce replay protection, expanded failure feedback.
+- Protocol negotiation with compatibility guards and detailed handshake rejections.
 
 ## High-Level Verification Checklist
 1. **Networking handshake**
@@ -46,9 +47,6 @@
   - Config files & reload handling
   - Permission nodes & server commands (force build, cancel, etc.)
   - Audit logging / history (who built what, where)
-- Networking & security
-  - Payload version negotiation & compatibility guards
-  - Error handling for timeouts, invalid data
 - Persistence & restart resilience
   - Store queued jobs, reservations, logs in data files/DB
   - Reload state on server start, resume jobs safely

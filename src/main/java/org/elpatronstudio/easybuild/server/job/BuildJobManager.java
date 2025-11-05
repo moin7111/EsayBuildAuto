@@ -39,6 +39,7 @@ public final class BuildJobManager {
 
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final BuildJobManager INSTANCE = new BuildJobManager();
+    private static final int MAX_STALLED_TICKS = 200;
 
     private final Map<String, BuildJobState> jobs = new ConcurrentHashMap<>();
     private final Map<UUID, Set<String>> playerJobs = new ConcurrentHashMap<>();
@@ -485,6 +486,23 @@ public final class BuildJobManager {
                         ThreadLocalRandom.current().nextLong(),
                         System.currentTimeMillis()
                 ));
+                if (!finished) {
+                    if (placed > active.lastPlaced) {
+                        active.lastPlaced = placed;
+                        active.stalledTicks = 0;
+                    } else {
+                        active.stalledTicks++;
+                        if (active.stalledTicks > MAX_STALLED_TICKS) {
+                            LOGGER.warn("Job {} timed out after {} stalled ticks", active.state.job().jobId(), active.stalledTicks);
+                            failJob(active.level, active.state, "TIMEOUT", "Keine Fortschritts-Updates innerhalb des Zeitlimits.", false);
+                            currentJob = null;
+                            return;
+                        }
+                    }
+                } else {
+                    active.lastPlaced = placed;
+                }
+
                 if (finished) {
                     completeJob(active.level, active.state, active.executor);
                     currentJob = null;
@@ -561,11 +579,15 @@ public final class BuildJobManager {
         private final BuildJobState state;
         private final ServerLevel level;
         private final BlockPlacementExecutor executor;
+        private int stalledTicks;
+        private int lastPlaced;
 
         private ActiveJob(BuildJobState state, ServerLevel level, BlockPlacementExecutor executor) {
             this.state = state;
             this.level = level;
             this.executor = executor;
+            this.lastPlaced = executor.placedBlocks();
+            this.stalledTicks = 0;
         }
     }
 

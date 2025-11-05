@@ -66,9 +66,14 @@ public record ClientboundHelloAcknowledge(
         Minecraft minecraft = Minecraft.getInstance();
         ClientHandshakeState.get().recordSuccess(protocolVersion, serverVersion, serverCapabilities, configHash, nonce, serverTime);
         if (minecraft.player != null) {
-            String capabilitySummary = serverCapabilities.isEmpty() ? "keine zusätzlichen" : String.join(", ", serverCapabilities);
-            minecraft.player.displayClientMessage(Component.literal("[EasyBuild] Handshake ok – Server " + serverVersion
-                    + " (Protokoll " + protocolVersion + ") – Features: " + capabilitySummary + "."), false);
+            String capabilitySummary = serverCapabilities.isEmpty() ? "none" : String.join(", ", serverCapabilities);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.handshake.ok", serverVersion, protocolVersion, capabilitySummary), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.header"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line1"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line2"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line3"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line4"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.guide.line5"), false);
         }
     }
 }

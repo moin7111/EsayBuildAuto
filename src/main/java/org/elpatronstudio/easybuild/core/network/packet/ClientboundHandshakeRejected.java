@@ -57,8 +57,7 @@ public record ClientboundHandshakeRejected(
             String required = requiredProtocol == null || requiredProtocol.isBlank()
                     ? EasyBuildNetwork.supportedProtocolSummary()
                     : requiredProtocol;
-            minecraft.player.displayClientMessage(Component.literal("[EasyBuild] Handshake fehlgeschlagen: " + reason
-                    + " (erforderliches Protokoll: " + required + ")"), true);
+            minecraft.player.displayClientMessage(Component.translatable("message.easybuild.handshake.failed", reason, required), true);
         }
     }
 }

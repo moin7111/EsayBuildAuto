@@ -1,5 +1,13 @@
 {
   "itemGroup.esaybuildauto": "Example Mod Tab",
   "block.esaybuildauto.example_block": "Example Block",
-  "item.esaybuildauto.example_item": "Example Item"
+  "item.esaybuildauto.example_item": "Example Item",
+  "message.easybuild.handshake.ok": "[EasyBuild] Handshake ok – Server %1$s (Protocol %2$s) – Features: %3$s.",
+  "message.easybuild.handshake.failed": "[EasyBuild] Handshake failed: %1$s (required protocol: %2$s)",
+  "message.easybuild.guide.header": "[EasyBuild] Quick test guide:",
+  "message.easybuild.guide.line1": " - Press 'P' to toggle the client auto-build using the configured default schematic.",
+  "message.easybuild.guide.line2": " - Look at a chest and press 'O' to register it as a material source; press 'L' to remove it again.",
+  "message.easybuild.guide.line3": " - Watch the chat for material check and build job feedback while blocks are being placed.",
+  "message.easybuild.guide.line4": " - Try disconnecting/reconnecting; active jobs clean up on logout and stalled jobs timeout automatically.",
+  "message.easybuild.guide.line5": " - Review the server log for detailed EasyBuild job lifecycle entries when testing complex schematics."
 }

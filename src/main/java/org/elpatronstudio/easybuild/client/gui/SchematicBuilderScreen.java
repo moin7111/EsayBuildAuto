@@ -7,10 +7,12 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.ObjectSelectionList;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
+import org.elpatronstudio.easybuild.client.ClientChestRegistry;
 import org.elpatronstudio.easybuild.client.model.SchematicFileEntry;
 import org.elpatronstudio.easybuild.client.schematic.SchematicRepository;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
@@ -23,6 +25,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 /**
  * Primary GUI for selecting schematics and launching builds.
@@ -38,6 +41,12 @@ public class SchematicBuilderScreen extends Screen {
     private static final Component RELOAD_BUTTON = Component.translatable("easybuild.gui.reload");
     private static final DateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT);
     private static final DecimalFormat SIZE_FORMAT = new DecimalFormat("#,##0.##");
+    private static final int COLOR_TEXT_PRIMARY = 0xE0E0E0;
+    private static final int COLOR_TEXT_SECONDARY = 0xA0A0A0;
+    private static final int COLOR_STATUS_READY = 0x55FF55;
+    private static final int COLOR_STATUS_RESERVED = 0xFFD37F;
+    private static final int COLOR_STATUS_MISSING = 0xFF5555;
+    private static final int COLOR_STATUS_UNKNOWN = 0xA0A0A0;
 
     private final EasyBuildClientState state = EasyBuildClientState.get();
     private SchematicSelectionList selectionList;
@@ -57,6 +66,7 @@ public class SchematicBuilderScreen extends Screen {
             return;
         }
 
+        loadPersistedChests();
         loadSchematics();
 
         int listWidth = Mth.clamp(this.width / 2 - 32, 160, 220);
@@ -76,7 +86,10 @@ public class SchematicBuilderScreen extends Screen {
                 .withValues(BuildMode.values())
                 .withInitialValue(state.buildMode())
                 .displayOnlyValue()
-                .create(rightPaneLeft, listTop, buttonWidth, 20, MODE_LABEL, (button, value) -> state.setBuildMode(value));
+                .create(rightPaneLeft, listTop, buttonWidth, 20, MODE_LABEL, (button, value) -> {
+                    state.setBuildMode(value);
+                    updateButtonStates();
+                });
         this.addRenderableWidget(modeButton);
 
         this.chestButton = Button.builder(CHEST_BUTTON, button -> onSelectChests())
@@ -113,8 +126,25 @@ public class SchematicBuilderScreen extends Screen {
     }
 
     private void updateButtonStates() {
+        if (startButton == null || materialsButton == null || chestButton == null) {
+            return;
+        }
+
         boolean hasSelection = state.selectedSchematic().isPresent();
-        this.startButton.active = hasSelection;
+        Optional<EasyBuildClientState.MaterialStatus> statusOpt = currentMaterialStatus();
+        boolean needsMaterials = hasSelection && state.buildMode() != BuildMode.SELF;
+        boolean materialsReady = !needsMaterials || statusOpt.map(EasyBuildClientState.MaterialStatus::ready).orElse(true);
+
+        this.startButton.active = hasSelection && materialsReady;
+        if (needsMaterials && statusOpt.isPresent() && !statusOpt.get().ready()) {
+            EasyBuildClientState.MaterialStatus status = statusOpt.get();
+            int missingStacks = status.missing().size();
+            int missingItems = totalMissingItems(status);
+            this.startButton.setTooltip(Tooltip.create(Component.translatable("easybuild.gui.start.tooltip.missing", missingStacks, missingItems)));
+        } else {
+            this.startButton.setTooltip(null);
+        }
+
         this.materialsButton.active = hasSelection;
         this.chestButton.active = hasSelection;
     }
@@ -141,14 +171,15 @@ public class SchematicBuilderScreen extends Screen {
         int left = this.selectionList.getX() + this.selectionList.getWidth() + 28;
         int top = this.selectionList.getY() + 120;
         Font font = this.font;
-        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.name", entry.displayName()), left, top, 0xE0E0E0, false);
-        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.path", entry.id()), left, top + 14, 0xA0A0A0, false);
-        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.size", humanReadableSize(entry.fileSize())), left, top + 28, 0xA0A0A0, false);
+        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.name", entry.displayName()), left, top, COLOR_TEXT_PRIMARY, false);
+        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.path", entry.id()), left, top + 14, COLOR_TEXT_SECONDARY, false);
+        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.size", humanReadableSize(entry.fileSize())), left, top + 28, COLOR_TEXT_SECONDARY, false);
         if (entry.lastModified() > 0L) {
-            guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.modified", DATE_FORMAT.format(new Date(entry.lastModified()))), left, top + 42, 0xA0A0A0, false);
+            guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.modified", DATE_FORMAT.format(new Date(entry.lastModified()))), left, top + 42, COLOR_TEXT_SECONDARY, false);
         }
-        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.mode", state.buildMode().title()), left, top + 58, 0xE0E0E0, false);
-        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.chests", state.selectedChests().size()), left, top + 72, 0xE0E0E0, false);
+        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.mode", state.buildMode().title()), left, top + 58, COLOR_TEXT_PRIMARY, false);
+        guiGraphics.drawString(font, Component.translatable("easybuild.gui.detail.chests", state.selectedChests().size()), left, top + 72, COLOR_TEXT_PRIMARY, false);
+        renderMaterialStatus(guiGraphics, left, top + 86);
     }
 
     private String humanReadableSize(long bytes) {
@@ -165,6 +196,36 @@ public class SchematicBuilderScreen extends Screen {
         return SIZE_FORMAT.format(value) + " " + units[unit];
     }
 
+    private void renderMaterialStatus(GuiGraphics guiGraphics, int left, int top) {
+        Font font = this.font;
+        Optional<EasyBuildClientState.MaterialStatus> statusOpt = currentMaterialStatus();
+        Component line;
+        int color;
+        if (statusOpt.isEmpty()) {
+            line = Component.translatable("easybuild.gui.detail.material_status.unknown");
+            color = COLOR_STATUS_UNKNOWN;
+        } else {
+            EasyBuildClientState.MaterialStatus status = statusOpt.get();
+            if (status.ready()) {
+                if (status.reserved()) {
+                    long timeLeftMillis = status.reservationExpiresAt() - System.currentTimeMillis();
+                    long seconds = Math.max(0L, timeLeftMillis / 1000L);
+                    line = Component.translatable("easybuild.gui.detail.material_status.reserved", seconds);
+                    color = COLOR_STATUS_RESERVED;
+                } else {
+                    line = Component.translatable("easybuild.gui.detail.material_status.ready");
+                    color = COLOR_STATUS_READY;
+                }
+            } else {
+                int missingStacks = status.missing().size();
+                int missingItems = totalMissingItems(status);
+                line = Component.translatable("easybuild.gui.detail.material_status.missing", missingStacks, missingItems);
+                color = COLOR_STATUS_MISSING;
+            }
+        }
+        guiGraphics.drawString(font, line, left, top, color, false);
+    }
+
     private void loadSchematics() {
         if (minecraft == null) {
             return;
@@ -175,6 +236,14 @@ public class SchematicBuilderScreen extends Screen {
         if (state.selectedSchematic().isEmpty() && !entries.isEmpty()) {
             state.selectSchematic(entries.get(0));
         }
+    }
+
+    private void loadPersistedChests() {
+        if (minecraft == null) {
+            return;
+        }
+        Path gameDir = minecraft.gameDirectory.toPath();
+        state.setSelectedChests(ClientChestRegistry.getAll(gameDir));
     }
 
     private void refreshSelectionList() {
@@ -220,6 +289,14 @@ public class SchematicBuilderScreen extends Screen {
     public void onClose() {
         super.onClose();
         minecraft.setScreen(null);
+    }
+
+    private Optional<EasyBuildClientState.MaterialStatus> currentMaterialStatus() {
+        return state.selectedSchematic().flatMap(entry -> state.materialStatus(entry.ref()));
+    }
+
+    private int totalMissingItems(EasyBuildClientState.MaterialStatus status) {
+        return status.missing().stream().mapToInt(stack -> Math.max(0, stack.count())).sum();
     }
 
     private final class SchematicSelectionList extends ObjectSelectionList<SchematicEntry> {

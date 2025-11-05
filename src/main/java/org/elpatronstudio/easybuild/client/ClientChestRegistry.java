@@ -97,8 +97,17 @@ public final class ClientChestRegistry {
         List<ChestRef> refs = new ArrayList<>();
         for (Entry entry : ENTRIES) {
             if (entry.dimension.equals(dimension)) {
-                refs.add(new ChestRef(entry.dimension, entry.pos));
+                refs.add(new ChestRef(entry.dimension, entry.pos.immutable()));
             }
+        }
+        return refs;
+    }
+
+    public static List<ChestRef> getAll(Path gameDir) {
+        load(gameDir);
+        List<ChestRef> refs = new ArrayList<>(ENTRIES.size());
+        for (Entry entry : ENTRIES) {
+            refs.add(new ChestRef(entry.dimension, entry.pos.immutable()));
         }
         return refs;
     }

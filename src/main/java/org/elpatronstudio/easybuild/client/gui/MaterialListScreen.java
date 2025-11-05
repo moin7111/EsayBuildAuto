@@ -83,7 +83,7 @@ public class MaterialListScreen extends Screen {
         guiGraphics.drawCenteredString(this.font, header, this.width / 2, 20, 0xFFFFFF);
 
         Component statusLine = buildStatusLine();
-        guiGraphics.drawCenteredString(this.font, statusLine, this.width / 2, 40, 0xFFD37F);
+        guiGraphics.drawCenteredString(this.font, statusLine, this.width / 2, 40, resolveStatusColor());
 
         if (currentStatus != null && currentStatus.suggestedSources().size() > 0) {
             guiGraphics.drawCenteredString(this.font,
@@ -101,9 +101,30 @@ public class MaterialListScreen extends Screen {
             return Component.translatable("easybuild.gui.materials.status.wait");
         }
         if (currentStatus.ready()) {
+            if (currentStatus.reserved()) {
+                long timeLeftMillis = currentStatus.reservationExpiresAt() - System.currentTimeMillis();
+                long seconds = Math.max(0L, timeLeftMillis / 1000L);
+                return Component.translatable("easybuild.gui.materials.status.reserved", seconds);
+            }
             return Component.translatable("easybuild.gui.materials.status.ready");
         }
-        return Component.translatable("easybuild.gui.materials.status.missing", currentStatus.missing().size());
+        int types = currentStatus.missing().size();
+        int total = totalMissingItems(currentStatus);
+        return Component.translatable("easybuild.gui.materials.status.missing", types, total);
+    }
+
+    private int resolveStatusColor() {
+        if (currentStatus == null) {
+            return 0xA0A0A0;
+        }
+        if (currentStatus.ready()) {
+            return currentStatus.reserved() ? 0xFFD37F : 0x55FF55;
+        }
+        return 0xFF5555;
+    }
+
+    private int totalMissingItems(EasyBuildClientState.MaterialStatus status) {
+        return status.missing().stream().mapToInt(stack -> Math.max(0, stack.count())).sum();
     }
 
     @Override
@@ -153,8 +174,8 @@ public class MaterialListScreen extends Screen {
             Component count = Component.translatable("easybuild.gui.materials.count", stack.count());
             int x = getContentX();
             int y = getContentY();
-            guiGraphics.drawString(Minecraft.getInstance().font, itemName, x, y, 0xFFFFFF, false);
-            guiGraphics.drawString(Minecraft.getInstance().font, count, getContentRight() - Minecraft.getInstance().font.width(count), y, 0xFFA000, false);
+            guiGraphics.drawString(Minecraft.getInstance().font, itemName, x, y, 0xFF5555, false);
+            guiGraphics.drawString(Minecraft.getInstance().font, count, getContentRight() - Minecraft.getInstance().font.width(count), y, 0xFFAA55, false);
         }
 
         private static String resolveItemName(MaterialStack stack) {

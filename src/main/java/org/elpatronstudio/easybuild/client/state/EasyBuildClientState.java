@@ -159,11 +159,24 @@ public final class EasyBuildClientState {
         return Collections.unmodifiableSet(new LinkedHashSet<>(selectedChests));
     }
 
-    public synchronized void toggleChest(ChestRef ref) {
-        if (selectedChests.contains(ref)) {
-            selectedChests.remove(ref);
-        } else {
-            selectedChests.add(ref);
+    public synchronized boolean toggleChest(ChestRef ref) {
+        Objects.requireNonNull(ref, "ref");
+        if (selectedChests.remove(ref)) {
+            return false;
+        }
+        selectedChests.add(ref);
+        return true;
+    }
+
+    public synchronized void setSelectedChests(Iterable<ChestRef> chests) {
+        selectedChests.clear();
+        if (chests == null) {
+            return;
+        }
+        for (ChestRef ref : chests) {
+            if (ref != null) {
+                selectedChests.add(ref);
+            }
         }
     }
 

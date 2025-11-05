@@ -99,7 +99,7 @@ public final class EasyBuildGuiActions {
         JsonObject options = buildClientOptions(player);
 
         try {
-            controller.start(schematic.ref(), anchor, Config.clientDefaultPasteMode, options);
+            controller.start(schematic, anchor, Config.clientDefaultPasteMode, options);
         } catch (BlockPlacementException ex) {
             player.displayClientMessage(Component.translatable("easybuild.autobuild.error", ex.getMessage()), false);
         }

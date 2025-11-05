@@ -1,25 +1,15 @@
 package org.elpatronstudio.easybuild.client.autobuild;
 
 import com.google.gson.JsonObject;
-import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.logging.LogUtils;
-import io.netty.buffer.Unpooled;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
-import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtIo;
-import net.minecraft.nbt.Tag;
-import net.minecraft.nbt.NbtAccounter;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.util.Mth;
@@ -32,14 +22,13 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.level.storage.TagValueInput;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import org.elpatronstudio.easybuild.client.model.SchematicFileEntry;
+import org.elpatronstudio.easybuild.client.schematic.SchematicBlockLoader;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.model.AnchorPos;
 import org.elpatronstudio.easybuild.core.model.PasteMode;
@@ -48,17 +37,11 @@ import org.elpatronstudio.easybuild.server.job.BlockPlacementException;
 import org.elpatronstudio.esaybuildauto.Config;
 import org.slf4j.Logger;
 
-import java.io.IOException;
-import java.nio.file.Path;
-import java.nio.file.Files;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -111,10 +94,10 @@ public final class ClientPlacementController {
         }
 
         JsonObject config = options == null ? new JsonObject() : options.deepCopy();
-        Rotation rotation = rotationFor(anchor.facing());
         boolean includeAir = includeAir(config);
         int blocksPerTick = resolveBlocksPerTick(mode, config);
-        PlacementPlan plan = buildPlan(player, entry, anchor, rotation, includeAir);
+        SchematicBlockLoader.Result parsed = SchematicBlockLoader.load(player, entry, anchor, includeAir);
+        PlacementPlan plan = new PlacementPlan(parsed.displayName(), toClientPlacements(parsed.blocks()));
 
         if (plan.placements().isEmpty()) {
             throw new BlockPlacementException("SCHEMATIC_EMPTY", "Die Schematic enthält keine platzierbaren Blöcke");
@@ -175,348 +158,12 @@ public final class ClientPlacementController {
         return Mth.clamp(Config.clientBlocksPerTick, 1, 32);
     }
 
-    private static Rotation rotationFor(Direction facing) {
-        return switch (facing) {
-            case EAST -> Rotation.CLOCKWISE_90;
-            case SOUTH -> Rotation.CLOCKWISE_180;
-            case WEST -> Rotation.COUNTERCLOCKWISE_90;
-            default -> Rotation.NONE;
-        };
-    }
-
-    private static PlacementPlan buildPlan(LocalPlayer player, SchematicFileEntry entry, AnchorPos anchor, Rotation rotation, boolean includeAir) throws BlockPlacementException {
-        Path path = entry.path();
-        if (!Files.isRegularFile(path)) {
-            throw new BlockPlacementException("SCHEMATIC_FILE_MISSING", "Datei nicht gefunden: " + entry.id());
+    private static List<ClientPlacement> toClientPlacements(List<SchematicBlockLoader.BlockInstance> blocks) {
+        List<ClientPlacement> placements = new ArrayList<>(blocks.size());
+        for (SchematicBlockLoader.BlockInstance block : blocks) {
+            placements.add(new ClientPlacement(block));
         }
-
-        CompoundTag rootTag = readSchematicTag(path);
-        String lowerName = path.getFileName().toString().toLowerCase(Locale.ROOT);
-        if (lowerName.endsWith(".schem")) {
-            return loadSpongeFormat(player, rootTag, anchor, rotation, includeAir, entry.displayName());
-        }
-        if (lowerName.endsWith(".nbt")) {
-            return loadStructureFormat(player, rootTag, anchor, rotation, includeAir, entry.displayName());
-        }
-        throw new BlockPlacementException("SCHEMATIC_FORMAT", "Nicht unterstütztes Format: " + lowerName);
-    }
-
-    private static PlacementPlan loadSpongeFormat(LocalPlayer player, CompoundTag root, AnchorPos anchor,
-                                                  Rotation rotation, boolean includeAir, String displayName) throws BlockPlacementException {
-        CompoundTag paletteTag = root.getCompound("Palette")
-                .orElseThrow(() -> new BlockPlacementException("SCHEMATIC_INVALID", "Palette fehlt in der Schematic"));
-
-        if (root.getByteArray("BlockData").isEmpty() && root.getLongArray("BlockData").isEmpty()) {
-            throw new BlockPlacementException("SCHEMATIC_INVALID", "BlockData fehlt in der Schematic");
-        }
-
-        int width = root.getInt("Width").orElse(0);
-        int height = root.getInt("Height").orElse(0);
-        int length = root.getInt("Length").orElse(0);
-        if (width <= 0 || height <= 0 || length <= 0) {
-            throw new BlockPlacementException("SCHEMATIC_INVALID", "Ungültige Dimensionsangaben in der Schematic");
-        }
-
-        int offsetX = root.getInt("OffsetX").orElse(0);
-        int offsetY = root.getInt("OffsetY").orElse(0);
-        int offsetZ = root.getInt("OffsetZ").orElse(0);
-
-        HolderLookup<Block> blockLookup = player.level().registryAccess().lookupOrThrow(Registries.BLOCK);
-        Map<Integer, BlockState> palette = parsePalette(paletteTag, blockLookup);
-        int volume = width * height * length;
-        int[] indices = decodeBlockData(root, volume, palette.size());
-        Map<BlockPos, CompoundTag> blockEntities = extractBlockEntities(root);
-
-        BlockPos anchorPos = new BlockPos(anchor.x(), anchor.y(), anchor.z());
-        List<ClientPlacement> placements = new ArrayList<>(volume);
-        BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
-        BlockPos.MutableBlockPos rotatedPos = new BlockPos.MutableBlockPos();
-
-        int localMinX = Integer.MAX_VALUE;
-        int localMinY = Integer.MAX_VALUE;
-        int localMinZ = Integer.MAX_VALUE;
-
-        List<IntermediatePlacement> intermediate = new ArrayList<>(volume);
-
-        for (int index = 0; index < indices.length; index++) {
-            BlockState state = palette.getOrDefault(indices[index], Blocks.AIR.defaultBlockState());
-            int x = index % width;
-            int temp = index / width;
-            int z = temp % length;
-            int y = temp / length;
-
-            BlockPos original = new BlockPos(x, y, z);
-            mutable.set(x - offsetX, y - offsetY, z - offsetZ);
-            BlockPos rotated = rotateAroundOrigin(mutable, rotation, rotatedPos);
-            intermediate.add(new IntermediatePlacement(original, new BlockPos(rotated), state));
-
-            localMinX = Math.min(localMinX, rotated.getX());
-            localMinY = Math.min(localMinY, rotated.getY());
-            localMinZ = Math.min(localMinZ, rotated.getZ());
-        }
-
-        BlockPos translation = new BlockPos(-localMinX, -localMinY, -localMinZ);
-        for (IntermediatePlacement placement : intermediate) {
-            BlockPos translated = placement.rotated().offset(translation);
-            BlockState rotatedState = placement.state().rotate(rotation);
-            if (!includeAir && rotatedState.isAir()) {
-                continue;
-            }
-            Item requiredItem = rotatedState.getBlock().asItem();
-            if (requiredItem == Items.AIR && !rotatedState.isAir()) {
-                LOGGER.warn("Überspringe Block {} bei {} – kein Item verfügbar", rotatedState, translated);
-                continue;
-            }
-            BlockPos worldPos = anchorPos.offset(translated);
-            CompoundTag beTag = blockEntities.getOrDefault(placement.original(), null);
-            if (beTag != null) {
-                beTag = beTag.copy();
-            }
-            placements.add(new ClientPlacement(worldPos, rotatedState, beTag, requiredItem));
-        }
-
-        placements.sort(Comparator
-                .comparingInt((ClientPlacement placement) -> placement.position.getY())
-                .thenComparingInt(placement -> placement.position.getX())
-                .thenComparingInt(placement -> placement.position.getZ()));
-
-        return new PlacementPlan(displayName, placements);
-    }
-
-    private static PlacementPlan loadStructureFormat(LocalPlayer player, CompoundTag root, AnchorPos anchor,
-                                                     Rotation rotation, boolean includeAir, String displayName) throws BlockPlacementException {
-        ListTag sizeTag = root.getListOrEmpty("size");
-        int width = sizeTag.getIntOr(0, 0);
-        int height = sizeTag.getIntOr(1, 0);
-        int length = sizeTag.getIntOr(2, 0);
-        if (width <= 0 || height <= 0 || length <= 0) {
-            throw new BlockPlacementException("SCHEMATIC_INVALID", "Ungültige Dimensionsangaben in der Struktur");
-        }
-
-        HolderLookup.Provider registries = player.level().registryAccess();
-        HolderLookup<Block> blockLookup = registries.lookupOrThrow(Registries.BLOCK);
-        List<BlockState> palette = new ArrayList<>();
-        Optional<ListTag> paletteList = root.getList("palettes");
-        ListTag primaryPalette = paletteList.filter(tag -> !tag.isEmpty()).map(tag -> tag.getListOrEmpty(0)).orElseGet(() -> root.getListOrEmpty("palette"));
-        for (int i = 0; i < primaryPalette.size(); i++) {
-            palette.add(NbtUtils.readBlockState(blockLookup, primaryPalette.getCompoundOrEmpty(i)));
-        }
-        if (palette.isEmpty()) {
-            throw new BlockPlacementException("SCHEMATIC_INVALID", "Palette konnte nicht gelesen werden");
-        }
-
-        ListTag blocksTag = root.getListOrEmpty("blocks");
-        if (blocksTag.isEmpty()) {
-            throw new BlockPlacementException("SCHEMATIC_INVALID", "Blockliste ist leer");
-        }
-
-        BlockPos anchorPos = new BlockPos(anchor.x(), anchor.y(), anchor.z());
-        List<IntermediatePlacement> intermediate = new ArrayList<>(blocksTag.size());
-        Map<BlockPos, CompoundTag> blockEntities = new HashMap<>();
-
-        int localMinX = Integer.MAX_VALUE;
-        int localMinY = Integer.MAX_VALUE;
-        int localMinZ = Integer.MAX_VALUE;
-
-        BlockPos.MutableBlockPos rotatedBuffer = new BlockPos.MutableBlockPos();
-
-        for (int i = 0; i < blocksTag.size(); i++) {
-            Tag element = blocksTag.get(i);
-            Optional<CompoundTag> blockTagOptional = element.asCompound();
-            if (blockTagOptional.isEmpty()) {
-                continue;
-            }
-            CompoundTag blockTag = blockTagOptional.get();
-            ListTag posList = blockTag.getListOrEmpty("pos");
-            BlockPos original = new BlockPos(posList.getIntOr(0, 0), posList.getIntOr(1, 0), posList.getIntOr(2, 0));
-            int paletteIndex = blockTag.getIntOr("state", 0);
-            if (paletteIndex < 0 || paletteIndex >= palette.size()) {
-                throw new BlockPlacementException("SCHEMATIC_INVALID", "Palette-Index " + paletteIndex + " außerhalb des gültigen Bereichs");
-            }
-            BlockState state = palette.get(paletteIndex);
-            BlockPos rotated = rotateAroundOrigin(original, rotation, rotatedBuffer);
-            intermediate.add(new IntermediatePlacement(original, new BlockPos(rotated), state));
-            localMinX = Math.min(localMinX, rotated.getX());
-            localMinY = Math.min(localMinY, rotated.getY());
-            localMinZ = Math.min(localMinZ, rotated.getZ());
-            blockTag.getCompound("nbt").ifPresent(nbt -> blockEntities.put(original, nbt));
-        }
-
-        BlockPos translation = new BlockPos(-localMinX, -localMinY, -localMinZ);
-        List<ClientPlacement> placements = new ArrayList<>(intermediate.size());
-        for (IntermediatePlacement placement : intermediate) {
-            BlockPos translated = placement.rotated().offset(translation);
-            BlockState rotatedState = placement.state().rotate(rotation);
-            if (!includeAir && rotatedState.isAir()) {
-                continue;
-            }
-            Item requiredItem = rotatedState.getBlock().asItem();
-            if (requiredItem == Items.AIR && !rotatedState.isAir()) {
-                LOGGER.warn("Überspringe Block {} bei {} – kein Item verfügbar", rotatedState, translated);
-                continue;
-            }
-            BlockPos worldPos = anchorPos.offset(translated);
-            CompoundTag blockEntityTag = blockEntities.get(placement.original());
-            if (blockEntityTag != null) {
-                blockEntityTag = blockEntityTag.copy();
-            }
-            placements.add(new ClientPlacement(worldPos, rotatedState, blockEntityTag, requiredItem));
-        }
-
-        placements.sort(Comparator
-                .comparingInt((ClientPlacement placement) -> placement.position.getY())
-                .thenComparingInt(placement -> placement.position.getX())
-                .thenComparingInt(placement -> placement.position.getZ()));
-
-        return new PlacementPlan(displayName, placements);
-    }
-
-    private static CompoundTag readSchematicTag(Path path) throws BlockPlacementException {
-        try {
-            return NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap());
-        } catch (IOException ex) {
-            try {
-                CompoundTag fallback = NbtIo.read(path);
-                if (fallback != null) {
-                    return fallback;
-                }
-            } catch (IOException ignored) {
-            }
-            throw new BlockPlacementException("SCHEMATIC_IO", "Fehler beim Lesen der Schematic: " + ex.getMessage());
-        }
-    }
-
-    private static Map<Integer, BlockState> parsePalette(CompoundTag paletteTag, HolderLookup<Block> lookup) throws BlockPlacementException {
-        Map<Integer, BlockState> palette = new HashMap<>();
-        for (Map.Entry<String, Tag> entry : paletteTag.entrySet()) {
-            String stateString = entry.getKey();
-            int index = entry.getValue().asInt().orElseThrow(() ->
-                    new BlockPlacementException("SCHEMATIC_INVALID", "Palette-Index fehlt für " + stateString));
-            try {
-                BlockStateParser.BlockResult result = BlockStateParser.parseForBlock(lookup, stateString, true);
-                BlockState state = result.blockState();
-                palette.put(index, state);
-            } catch (CommandSyntaxException ex) {
-                LOGGER.warn("Palette-Eintrag '{}' konnte nicht gelesen werden: {}", stateString, ex.getMessage());
-            }
-        }
-        if (palette.isEmpty()) {
-            throw new BlockPlacementException("SCHEMATIC_INVALID", "Palette konnte nicht gelesen werden");
-        }
-        return palette;
-    }
-
-    private static int[] decodeBlockData(CompoundTag root, int expectedEntries, int paletteSize) throws BlockPlacementException {
-        Optional<byte[]> rawBytes = root.getByteArray("BlockData");
-        if (rawBytes.isPresent()) {
-            FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.wrappedBuffer(rawBytes.get()));
-            int[] indices = new int[expectedEntries];
-            for (int i = 0; i < expectedEntries; i++) {
-                if (!buffer.isReadable()) {
-                    throw new BlockPlacementException("SCHEMATIC_INVALID", "BlockData ist kürzer als erwartet");
-                }
-                indices[i] = buffer.readVarInt();
-            }
-            return indices;
-        }
-
-        Optional<long[]> packedData = root.getLongArray("BlockData");
-        if (packedData.isPresent()) {
-            int bits = Math.max(2, Integer.SIZE - Integer.numberOfLeadingZeros(Math.max(1, paletteSize) - 1));
-            int mask = (1 << bits) - 1;
-            long[] packed = packedData.get();
-            int[] indices = new int[expectedEntries];
-            int entry = 0;
-            int longIndex = 0;
-            int bitOffset = 0;
-            while (entry < expectedEntries) {
-                if (longIndex >= packed.length) {
-                    throw new BlockPlacementException("SCHEMATIC_INVALID", "BlockData ist kürzer als erwartet");
-                }
-                long data = packed[longIndex];
-                indices[entry] = (int)((data >> bitOffset) & mask);
-                bitOffset += bits;
-                if (bitOffset >= 64) {
-                    longIndex++;
-                    bitOffset = 0;
-                }
-                entry++;
-            }
-            return indices;
-        }
-
-        throw new BlockPlacementException("SCHEMATIC_INVALID", "BlockData fehlt oder hat ein unbekanntes Format");
-    }
-
-    private static Map<BlockPos, CompoundTag> extractBlockEntities(CompoundTag root) {
-        Map<BlockPos, CompoundTag> map = new HashMap<>();
-        for (String key : new String[]{"BlockEntities", "TileEntities"}) {
-            Optional<ListTag> optionalList = root.getList(key);
-            if (optionalList.isEmpty()) {
-                continue;
-            }
-            for (Tag element : optionalList.get()) {
-                Optional<CompoundTag> optionalEntry = element.asCompound();
-                if (optionalEntry.isEmpty()) {
-                    continue;
-                }
-                CompoundTag entry = optionalEntry.get();
-                BlockPos pos = readLocalPos(entry);
-                if (pos == null) {
-                    continue;
-                }
-                CompoundTag data = entry.copy();
-                data.getString("Id").ifPresent(id -> data.putString("id", id));
-                data.remove("Id");
-                data.remove("Pos");
-                map.put(pos, data);
-            }
-            if (!map.isEmpty()) {
-                break;
-            }
-        }
-        return map;
-    }
-
-    private static BlockPos readLocalPos(CompoundTag tag) {
-        Optional<int[]> posArray = tag.getIntArray("Pos");
-        if (posArray.isPresent() && posArray.get().length >= 3) {
-            int[] arr = posArray.get();
-            return new BlockPos(arr[0], arr[1], arr[2]);
-        }
-
-        Optional<ListTag> listTag = tag.getList("Pos");
-        if (listTag.isPresent()) {
-            ListTag list = listTag.get();
-            if (list.size() >= 3) {
-                Optional<Integer> maybeX = list.get(0).asInt();
-                Optional<Integer> maybeY = list.get(1).asInt();
-                Optional<Integer> maybeZ = list.get(2).asInt();
-                if (maybeX.isPresent() && maybeY.isPresent() && maybeZ.isPresent()) {
-                    return new BlockPos(maybeX.get(), maybeY.get(), maybeZ.get());
-                }
-            }
-        }
-
-        int x = tag.getInt("x").orElse(Integer.MIN_VALUE);
-        int y = tag.getInt("y").orElse(Integer.MIN_VALUE);
-        int z = tag.getInt("z").orElse(Integer.MIN_VALUE);
-        if (x != Integer.MIN_VALUE && y != Integer.MIN_VALUE && z != Integer.MIN_VALUE) {
-            return new BlockPos(x, y, z);
-        }
-        return null;
-    }
-
-    private static BlockPos rotateAroundOrigin(BlockPos pos, Rotation rotation, BlockPos.MutableBlockPos result) {
-        int x = pos.getX();
-        int y = pos.getY();
-        int z = pos.getZ();
-        return switch (rotation) {
-            case CLOCKWISE_90 -> result.set(-z, y, x);
-            case CLOCKWISE_180 -> result.set(-x, y, -z);
-            case COUNTERCLOCKWISE_90 -> result.set(z, y, -x);
-            default -> result.set(x, y, z);
-        };
+        return placements;
     }
 
     private static final class PlacementSession {
@@ -787,9 +434,6 @@ public final class ClientPlacementController {
     private record PlacementPlan(String displayName, List<ClientPlacement> placements) {
     }
 
-    private record IntermediatePlacement(BlockPos original, BlockPos rotated, BlockState state) {
-    }
-
     private static final class ClientPlacement {
         final BlockPos position;
         final BlockState state;
@@ -803,6 +447,10 @@ public final class ClientPlacementController {
             this.blockEntityTag = blockEntityTag;
             this.requiredItem = requiredItem;
             this.attempts = 0;
+        }
+
+        ClientPlacement(SchematicBlockLoader.BlockInstance block) {
+            this(block.position(), block.state(), block.blockEntityTag(), block.requiredItem());
         }
     }
 }

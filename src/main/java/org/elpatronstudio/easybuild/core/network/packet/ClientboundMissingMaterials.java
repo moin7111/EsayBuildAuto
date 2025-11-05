@@ -5,6 +5,7 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
+import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.model.ChestRef;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
@@ -59,6 +60,9 @@ public record ClientboundMissingMaterials(
 
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
-        // TODO: surface missing materials UI update.
+        EasyBuildClientState.get().recordMissingMaterials(this);
+        if (minecraft.player != null) {
+            minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.translatable("easybuild.materials.missing.detail", missing.size(), schematic.schematicId()), true);
+        }
     }
 }

@@ -1,30 +1,39 @@
 package org.elpatronstudio.easybuild.client;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.Container;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.InputEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
-import org.elpatronstudio.easybuild.client.autobuild.ClientPlacementController;
-import org.elpatronstudio.easybuild.core.model.AnchorPos;
-import org.elpatronstudio.easybuild.core.model.PasteMode;
-import org.elpatronstudio.easybuild.core.model.SchematicRef;
-import org.elpatronstudio.easybuild.server.job.BlockPlacementException;
-import org.elpatronstudio.esaybuildauto.Config;
+import org.elpatronstudio.easybuild.client.ClientChestRegistry;
+import org.elpatronstudio.easybuild.client.ClientHandshakeState;
+import org.elpatronstudio.easybuild.client.gui.SchematicBuilderScreen;
+import org.elpatronstudio.easybuild.client.render.ChestSelectionRenderer;
+import org.elpatronstudio.easybuild.client.render.PreviewAnchorRenderer;
+import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
+import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
+import org.elpatronstudio.easybuild.core.network.packet.ServerboundHelloHandshake;
 import org.elpatronstudio.esaybuildauto.Esaybuildauto;
 import org.lwjgl.glfw.GLFW;
-import java.nio.file.Path;
+
+import net.minecraft.network.chat.Component;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import org.elpatronstudio.easybuild.core.model.ChestRef;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Client bootstrap hooks for EasyBuild features such as auto-build key handling.
@@ -32,21 +41,19 @@ import java.nio.file.Path;
 public final class EasyBuildClient {
 
     private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(ResourceLocation.fromNamespaceAndPath(Esaybuildauto.MODID, "controls"));
-    private static final KeyMapping AUTO_BUILD_KEY = new KeyMapping(
-            "key." + Esaybuildauto.MODID + ".autobuild",
+    private static final List<String> CLIENT_CAPABILITIES = List.of("gui", "auto_build", "insta_build");
+    private static final KeyMapping OPEN_GUI_KEY = new KeyMapping(
+            "key." + Esaybuildauto.MODID + ".open_gui",
             GLFW.GLFW_KEY_P,
             CATEGORY
     );
-    private static final KeyMapping REGISTER_CHEST_KEY = new KeyMapping(
-            "key." + Esaybuildauto.MODID + ".register_chest",
-            GLFW.GLFW_KEY_O,
+    private static final KeyMapping EXIT_SELECTION_KEY = new KeyMapping(
+            "key." + Esaybuildauto.MODID + ".exit_selection",
+            GLFW.GLFW_KEY_U,
             CATEGORY
     );
-    private static final KeyMapping REMOVE_CHEST_KEY = new KeyMapping(
-            "key." + Esaybuildauto.MODID + ".remove_chest",
-            GLFW.GLFW_KEY_L,
-            CATEGORY
-    );
+
+    private static boolean handshakeSent;
 
     private EasyBuildClient() {
     }
@@ -55,6 +62,8 @@ public final class EasyBuildClient {
         modEventBus.addListener(EasyBuildClient::onClientSetup);
         modEventBus.addListener(EasyBuildClient::onRegisterKeyMappings);
         NeoForge.EVENT_BUS.register(EasyBuildClient.class);
+        ChestSelectionRenderer.init();
+        PreviewAnchorRenderer.init();
     }
 
     private static void onClientSetup(final FMLClientSetupEvent event) {
@@ -67,135 +76,142 @@ public final class EasyBuildClient {
     }
 
     private static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
-        event.register(AUTO_BUILD_KEY);
-        event.register(REGISTER_CHEST_KEY);
-        event.register(REMOVE_CHEST_KEY);
+        event.register(OPEN_GUI_KEY);
+        event.register(EXIT_SELECTION_KEY);
     }
 
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
-        while (AUTO_BUILD_KEY.consumeClick()) {
-            toggleAutoBuild();
+        ensureHandshake();
+        while (OPEN_GUI_KEY.consumeClick()) {
+            openGui();
         }
-        while (REGISTER_CHEST_KEY.consumeClick()) {
-            handleChestRegistration(true);
+        while (EXIT_SELECTION_KEY.consumeClick()) {
+            exitChestSelection();
         }
-        while (REMOVE_CHEST_KEY.consumeClick()) {
-            handleChestRegistration(false);
+    }
+    private static void openGui() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null) {
+            return;
+        }
+        if (minecraft.screen instanceof SchematicBuilderScreen) {
+            return;
+        }
+        minecraft.setScreen(new SchematicBuilderScreen());
+    }
+
+    private static void exitChestSelection() {
+        EasyBuildClientState state = EasyBuildClientState.get();
+        if (state.isChestSelectionActive()) {
+            state.setChestSelectionActive(false);
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft != null && minecraft.player != null) {
+                minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.translatable("easybuild.chest_selection.ended"), true);
+                if (state.consumeReopenGuiRequest()) {
+                    minecraft.setScreen(new SchematicBuilderScreen());
+                }
+            }
         }
     }
 
     @SubscribeEvent
-    public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
-        ClientHandshakeState.get().clear();
-    }
-
-    private static void toggleAutoBuild() {
-        if (!Config.clientAutoBuildEnabled) {
+    public static void onMouseInput(InputEvent.MouseButton.Pre event) {
+        if (!EasyBuildClientState.get().isChestSelectionActive()) {
             return;
         }
-
-        ClientPlacementController controller = ClientPlacementController.get();
-        if (controller.isRunning()) {
-            controller.stop("Abgebrochen");
+        if (event.getButton() != GLFW.GLFW_MOUSE_BUTTON_LEFT || event.getAction() != GLFW.GLFW_PRESS) {
             return;
         }
-
-        Minecraft minecraft = Minecraft.getInstance();
-        LocalPlayer player = minecraft.player;
-        if (player == null || minecraft.level == null) {
-            return;
-        }
-
-        SchematicRef schematic = new SchematicRef(Config.clientDefaultSchematic, 1, 0L);
-        AnchorPos anchor = new AnchorPos(
-                player.level().dimension().location(),
-                player.blockPosition().getX(),
-                player.blockPosition().getY(),
-                player.blockPosition().getZ(),
-                player.getDirection()
-        );
-        JsonObject options = new JsonObject();
-        options.addProperty("placeAir", Config.clientPlaceAir);
-
-        JsonArray chests = new JsonArray();
-        for (var ref : ClientChestRegistry.getForDimension(Minecraft.getInstance().gameDirectory.toPath(), player.level().dimension().location())) {
-            JsonObject chestObj = new JsonObject();
-            chestObj.addProperty("dimension", ref.dimension().toString());
-            chestObj.addProperty("x", ref.blockPos().getX());
-            chestObj.addProperty("y", ref.blockPos().getY());
-            chestObj.addProperty("z", ref.blockPos().getZ());
-            chests.add(chestObj);
-        }
-
-        int radius = Math.max(0, Math.min(16, Config.clientChestSearchRadius));
-        int maxTargets = Math.max(0, Config.clientChestMaxTargets);
-        if (radius > 0 && maxTargets > 0) {
-            BlockPos origin = player.blockPosition();
-            int added = 0;
-            outerLoop:
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dy = -radius; dy <= radius; dy++) {
-                    for (int dz = -radius; dz <= radius; dz++) {
-                        if (added >= maxTargets) {
-                            break outerLoop;
-                        }
-                        BlockPos candidate = origin.offset(dx, dy, dz);
-                        BlockEntity blockEntity = player.level().getBlockEntity(candidate);
-                        if (blockEntity instanceof Container) {
-                            if (ClientChestRegistry.contains(Minecraft.getInstance().gameDirectory.toPath(), player.level().dimension().location(), candidate)) {
-                                continue;
-                            }
-                            JsonObject chestObj = new JsonObject();
-                            chestObj.addProperty("dimension", player.level().dimension().location().toString());
-                            chestObj.addProperty("x", candidate.getX());
-                            chestObj.addProperty("y", candidate.getY());
-                            chestObj.addProperty("z", candidate.getZ());
-                            chests.add(chestObj);
-                            added++;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (chests.size() > 0) {
-            options.add("chests", chests);
-        }
-
-        try {
-            controller.start(schematic, anchor, Config.clientDefaultPasteMode, options);
-        } catch (BlockPlacementException ex) {
-            player.displayClientMessage(net.minecraft.network.chat.Component.literal("[EasyBuild] Autobau fehlgeschlagen: " + ex.getMessage()), false);
+        if (handleChestSelectionClick()) {
+            event.setCanceled(true);
         }
     }
 
-    private static void handleChestRegistration(boolean add) {
+    private static boolean handleChestSelectionClick() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null || minecraft.player == null || minecraft.hitResult == null) {
-            return;
+            return false;
         }
-        if (!(minecraft.hitResult instanceof net.minecraft.world.phys.BlockHitResult bhr)) {
-            return;
+        if (!(minecraft.hitResult instanceof BlockHitResult blockHitResult)) {
+            return false;
         }
-        BlockPos pos = bhr.getBlockPos();
+        BlockPos pos = blockHitResult.getBlockPos();
         BlockEntity blockEntity = minecraft.level.getBlockEntity(pos);
         if (!ClientChestRegistry.isContainerBlockEntity(blockEntity)) {
-            minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.literal("[EasyBuild] Ziel ist kein Container."), true);
+            minecraft.player.displayClientMessage(Component.translatable("easybuild.chest_selection.not_container"), true);
+            return true;
+        }
+
+        ChestRef ref = new ChestRef(minecraft.level.dimension().location(), pos.immutable());
+        boolean alreadySelected = EasyBuildClientState.get().selectedChests().contains(ref);
+        EasyBuildClientState.get().toggleChest(ref);
+        String key = alreadySelected ? "easybuild.chest_selection.removed" : "easybuild.chest_selection.added";
+        minecraft.player.displayClientMessage(Component.translatable(key, pos.getX(), pos.getY(), pos.getZ()), true);
+        return true;
+    }
+
+    @SubscribeEvent
+    public static void onMouseScroll(InputEvent.MouseScrollingEvent event) {
+        Minecraft minecraft = Minecraft.getInstance();
+        com.mojang.blaze3d.platform.Window window = minecraft.getWindow();
+        boolean altDown = InputConstants.isKeyDown(window, GLFW.GLFW_KEY_LEFT_ALT)
+                || InputConstants.isKeyDown(window, GLFW.GLFW_KEY_RIGHT_ALT);
+        if (!altDown) {
             return;
         }
-        Path gameDir = minecraft.gameDirectory.toPath();
-        ResourceLocation dimension = minecraft.level.dimension().location();
-        if (add) {
-            boolean added = ClientChestRegistry.add(gameDir, dimension, pos);
-            minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.literal(added
-                    ? "[EasyBuild] Kiste registriert: " + pos.toShortString()
-                    : "[EasyBuild] Kiste war bereits registriert."), true);
-        } else {
-            boolean removed = ClientChestRegistry.remove(gameDir, dimension, pos);
-            minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.literal(removed
-                    ? "[EasyBuild] Kiste entfernt: " + pos.toShortString()
-                    : "[EasyBuild] Kiste war nicht registriert."), true);
+        double delta = event.getScrollDeltaY();
+        if (delta == 0.0D) {
+            return;
+        }
+        boolean shiftDown = InputConstants.isKeyDown(window, GLFW.GLFW_KEY_LEFT_SHIFT)
+                || InputConstants.isKeyDown(window, GLFW.GLFW_KEY_RIGHT_SHIFT);
+        boolean controlDown = InputConstants.isKeyDown(window, GLFW.GLFW_KEY_LEFT_CONTROL)
+                || InputConstants.isKeyDown(window, GLFW.GLFW_KEY_RIGHT_CONTROL);
+        double step = shiftDown ? 0.25D : (controlDown ? 4.0D : 1.0D);
+        double adjustment = delta > 0.0D ? step : -step;
+        EasyBuildClientState state = EasyBuildClientState.get();
+        state.adjustPreviewForwardOffset(adjustment);
+        event.setCanceled(true);
+        if (minecraft.player != null) {
+            double offset = state.previewForwardOffset();
+            minecraft.player.displayClientMessage(
+                    Component.translatable("easybuild.preview.offset", String.format(Locale.ROOT, "%.2f", offset)),
+                    true
+            );
         }
     }
+
+
+    @SubscribeEvent
+    public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
+        ClientHandshakeState.get().clear();
+        EasyBuildClientState.get().reset();
+        handshakeSent = false;
+    }
+
+    private static void ensureHandshake() {
+        if (handshakeSent) {
+            return;
+        }
+        Minecraft minecraft = Minecraft.getInstance();
+        ClientPacketListener connection = minecraft.getConnection();
+        LocalPlayer player = minecraft.player;
+        if (connection == null || player == null) {
+            return;
+        }
+
+        String clientVersion = minecraft.getVersionType() + "-" + minecraft.getLaunchedVersion();
+        long nonce = ThreadLocalRandom.current().nextLong();
+        ServerboundHelloHandshake payload = new ServerboundHelloHandshake(
+                player.getUUID(),
+                clientVersion,
+                EasyBuildNetwork.PROTOCOL_VERSION,
+                CLIENT_CAPABILITIES,
+                nonce
+        );
+        connection.send(payload);
+        handshakeSent = true;
+    }
+
 }

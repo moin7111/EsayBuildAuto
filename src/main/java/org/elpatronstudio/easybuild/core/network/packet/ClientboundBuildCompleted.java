@@ -4,8 +4,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
+import org.elpatronstudio.easybuild.core.model.SchematicRef;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.List;
@@ -16,6 +19,7 @@ import java.util.Objects;
  */
 public record ClientboundBuildCompleted(
         String jobId,
+        SchematicRef schematic,
         boolean success,
         List<MaterialStack> consumed,
         String logRef,
@@ -30,6 +34,7 @@ public record ClientboundBuildCompleted(
 
     public ClientboundBuildCompleted {
         Objects.requireNonNull(jobId, "jobId");
+        Objects.requireNonNull(schematic, "schematic");
         Objects.requireNonNull(consumed, "consumed");
         if (logRef == null) {
             logRef = "";
@@ -38,6 +43,7 @@ public record ClientboundBuildCompleted(
 
     private static void write(RegistryFriendlyByteBuf buf, ClientboundBuildCompleted message) {
         buf.writeUtf(message.jobId);
+        FriendlyByteBufUtil.writeSchematicRef(buf, message.schematic);
         buf.writeBoolean(message.success);
         FriendlyByteBufUtil.writeMaterialList(buf, message.consumed);
         buf.writeUtf(message.logRef);
@@ -47,12 +53,13 @@ public record ClientboundBuildCompleted(
 
     private static ClientboundBuildCompleted read(RegistryFriendlyByteBuf buf) {
         String jobId = buf.readUtf();
+        SchematicRef schematic = FriendlyByteBufUtil.readSchematicRef(buf);
         boolean success = buf.readBoolean();
         List<MaterialStack> consumed = FriendlyByteBufUtil.readMaterialList(buf);
         String logRef = buf.readUtf();
         long nonce = buf.readLong();
         long serverTime = buf.readLong();
-        return new ClientboundBuildCompleted(jobId, success, consumed, logRef, nonce, serverTime);
+        return new ClientboundBuildCompleted(jobId, schematic, success, consumed, logRef, nonce, serverTime);
     }
 
     @Override
@@ -62,6 +69,12 @@ public record ClientboundBuildCompleted(
 
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
-        // TODO: notify client UI of job completion and update logs/materials view.
+        EasyBuildClientState.get().recordBuildCompleted(this);
+        if (minecraft.player != null) {
+            Component message = success
+                    ? Component.translatable("easybuild.job.completed", jobId, schematic.schematicId())
+                    : Component.translatable("easybuild.job.completed.failed", jobId, schematic.schematicId());
+            minecraft.player.displayClientMessage(message, false);
+        }
     }
 }

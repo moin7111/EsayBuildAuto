@@ -4,7 +4,10 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
+import org.elpatronstudio.easybuild.core.model.SchematicRef;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 
 import java.util.Objects;
@@ -14,6 +17,8 @@ import java.util.Objects;
  */
 public record ClientboundBuildFailed(
         String jobId,
+        SchematicRef schematic,
+        String clientRequestId,
         String reasonCode,
         String details,
         boolean rollbackPerformed,
@@ -28,6 +33,8 @@ public record ClientboundBuildFailed(
 
     public ClientboundBuildFailed {
         Objects.requireNonNull(jobId, "jobId");
+        Objects.requireNonNull(schematic, "schematic");
+        Objects.requireNonNull(clientRequestId, "clientRequestId");
         Objects.requireNonNull(reasonCode, "reasonCode");
         if (details == null) {
             details = "";
@@ -36,6 +43,8 @@ public record ClientboundBuildFailed(
 
     private static void write(RegistryFriendlyByteBuf buf, ClientboundBuildFailed message) {
         buf.writeUtf(message.jobId);
+        FriendlyByteBufUtil.writeSchematicRef(buf, message.schematic);
+        buf.writeUtf(message.clientRequestId);
         buf.writeUtf(message.reasonCode);
         buf.writeUtf(message.details);
         buf.writeBoolean(message.rollbackPerformed);
@@ -45,12 +54,14 @@ public record ClientboundBuildFailed(
 
     private static ClientboundBuildFailed read(RegistryFriendlyByteBuf buf) {
         String jobId = buf.readUtf();
+        SchematicRef schematic = FriendlyByteBufUtil.readSchematicRef(buf);
+        String clientRequestId = buf.readUtf();
         String reason = buf.readUtf();
         String details = buf.readUtf();
         boolean rollback = buf.readBoolean();
         long nonce = buf.readLong();
         long serverTime = buf.readLong();
-        return new ClientboundBuildFailed(jobId, reason, details, rollback, nonce, serverTime);
+        return new ClientboundBuildFailed(jobId, schematic, clientRequestId, reason, details, rollback, nonce, serverTime);
     }
 
     @Override
@@ -60,6 +71,9 @@ public record ClientboundBuildFailed(
 
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
-        // TODO: display failure dialog / notifications to the user.
+        EasyBuildClientState.get().recordBuildFailed(this);
+        if (minecraft.player != null) {
+            minecraft.player.displayClientMessage(Component.translatable("easybuild.job.failed", jobId, reasonCode, details), true);
+        }
     }
 }

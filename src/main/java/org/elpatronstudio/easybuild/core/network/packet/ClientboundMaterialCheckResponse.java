@@ -5,6 +5,7 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
+import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
@@ -63,6 +64,13 @@ public record ClientboundMaterialCheckResponse(
 
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
-        // TODO: route response to client controller / UI state.
+        EasyBuildClientState.get().recordMaterialCheck(this);
+        if (minecraft.player != null) {
+            if (ok) {
+                minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.translatable("easybuild.materials.ok", schematic.schematicId()), false);
+            } else {
+                minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.translatable("easybuild.materials.missing", missing.size(), schematic.schematicId()), false);
+            }
+        }
     }
 }

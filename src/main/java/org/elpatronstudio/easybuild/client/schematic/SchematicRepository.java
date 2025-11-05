@@ -23,7 +23,7 @@ import java.util.zip.CRC32;
 public final class SchematicRepository {
 
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("schem", "schematic");
+    private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("schem", "schematic", "litematic", "nbt");
 
     private SchematicRepository() {
     }

@@ -1,32 +1,38 @@
 package org.elpatronstudio.easybuild.client.render;
 
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
+import org.joml.Matrix4f;
+import org.joml.Matrix4fStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.ShapeRenderer;
-import net.minecraft.core.BlockPos;
+import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.elpatronstudio.easybuild.client.preview.SchematicPreviewController;
 import org.elpatronstudio.easybuild.client.preview.SchematicPreviewController.Preview;
+import org.elpatronstudio.easybuild.client.preview.render.PreviewChunk;
+import org.elpatronstudio.easybuild.client.preview.render.PreviewChunkCache;
+import org.elpatronstudio.easybuild.client.preview.render.PreviewChunkMesh;
+import org.elpatronstudio.easybuild.client.preview.render.PreviewMeshBuilder;
+import org.elpatronstudio.easybuild.client.preview.render.PreviewTint;
 import org.elpatronstudio.easybuild.client.schematic.SchematicBlockLoader;
 
+import java.util.Map;
 import java.util.Optional;
 
 /**
- * Renders the active schematic preview as a translucent wireframe overlay.
+ * Renders the schematic hologram using cached chunk meshes similar to Litematica.
  */
 public final class SchematicPreviewRenderer {
 
-    private static final float[] COLOR_MISSING = {0.2F, 0.72F, 1.0F};
-    private static final float[] COLOR_CONFLICT = {1.0F, 0.45F, 0.35F};
+    private static final int SAMPLE_LIMIT = 32;
 
     private SchematicPreviewRenderer() {
     }
@@ -41,6 +47,7 @@ public final class SchematicPreviewRenderer {
         if (minecraft == null) {
             return;
         }
+
         Level level = minecraft.level;
         LocalPlayer player = minecraft.player;
         if (level == null || player == null) {
@@ -55,28 +62,87 @@ public final class SchematicPreviewRenderer {
         }
 
         Preview preview = maybePreview.get();
-        PoseStack poseStack = event.getPoseStack();
-        poseStack.pushPose();
-
-        Vec3 cameraPos = event.getLevelRenderState().cameraRenderState.pos;
-        MultiBufferSource.BufferSource buffer = minecraft.renderBuffers().bufferSource();
-        VertexConsumer consumer = buffer.getBuffer(RenderType.lines());
-
-        int rendered = 0;
-        for (SchematicBlockLoader.BlockInstance block : preview.blocks()) {
-            BlockPos pos = block.position();
-            if (level.getBlockState(pos).equals(block.state())) {
-                continue;
-            }
-
-            AABB box = new AABB(pos).inflate(0.002D).move(-cameraPos.x, -cameraPos.y, -cameraPos.z);
-            float[] color = level.getBlockState(pos).isAir() ? COLOR_MISSING : COLOR_CONFLICT;
-            ShapeRenderer.renderLineBox(poseStack.last(), consumer, box, color[0], color[1], color[2], 1.0F);
-            rendered++;
+        PreviewChunkCache cache = preview.chunkCache();
+        if (cache.allChunks().isEmpty()) {
+            return;
         }
 
-        poseStack.popPose();
+        BlockRenderDispatcher dispatcher = minecraft.getBlockRenderer();
+        PoseStack poseStack = event.getPoseStack();
+        Vec3 cameraPos = event.getLevelRenderState().cameraRenderState.pos;
 
-        buffer.endBatch(RenderType.lines());
+        for (PreviewChunk chunk : cache.allChunks()) {
+            if (shouldRebuild(level, chunk)) {
+                PreviewMeshBuilder.rebuildChunk(level, dispatcher, chunk);
+            }
+            renderChunk(chunk, poseStack, cameraPos);
+        }
+    }
+
+    private static boolean shouldRebuild(Level level, PreviewChunk chunk) {
+        if (chunk.isDirty()) {
+            return true;
+        }
+
+        boolean hasMesh = false;
+        for (PreviewTint tint : PreviewTint.values()) {
+            PreviewChunkMesh mesh = chunk.mesh(tint);
+            if (mesh != null && !mesh.isEmpty()) {
+                hasMesh = true;
+                break;
+            }
+        }
+        if (!hasMesh) {
+            return true;
+        }
+
+        if (chunk.blocks().isEmpty()) {
+            return false;
+        }
+
+        int sampleCount = Math.min(SAMPLE_LIMIT, chunk.blocks().size());
+        int step = Math.max(1, chunk.blocks().size() / sampleCount);
+        for (int i = 0; i < chunk.blocks().size(); i += step) {
+            SchematicBlockLoader.BlockInstance block = chunk.blocks().get(i);
+            BlockState worldState = level.getBlockState(block.position());
+            PreviewTint actual = PreviewMeshBuilder.determineTint(worldState, block.state());
+            PreviewTint cached = chunk.cachedTint(block.position());
+            if (actual != cached) {
+                chunk.markDirty();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void renderChunk(PreviewChunk chunk, PoseStack poseStack, Vec3 cameraPos) {
+        double dx = chunk.origin().getX() - cameraPos.x;
+        double dy = chunk.origin().getY() - cameraPos.y;
+        double dz = chunk.origin().getZ() - cameraPos.z;
+
+        poseStack.pushPose();
+        poseStack.translate(dx, dy, dz);
+        Matrix4f transform = new Matrix4f(poseStack.last().pose());
+
+        Matrix4fStack modelView = RenderSystem.getModelViewStack();
+        modelView.pushMatrix();
+        modelView.mul(transform);
+
+        for (PreviewTint tint : PreviewTint.values()) {
+            PreviewChunkMesh mesh = chunk.mesh(tint);
+            if (mesh == null || mesh.isEmpty()) {
+                continue;
+            }
+            for (Map.Entry<RenderType, MeshData> entry : mesh.layers().entrySet()) {
+                MeshData data = entry.getValue();
+                if (data != null) {
+                    entry.getKey().draw(data);
+                }
+            }
+        }
+
+        modelView.popMatrix();
+        poseStack.popPose();
     }
 }

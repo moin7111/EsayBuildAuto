@@ -3,6 +3,7 @@ package org.elpatronstudio.easybuild.client.preview;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import org.elpatronstudio.easybuild.client.model.SchematicFileEntry;
+import org.elpatronstudio.easybuild.client.preview.render.PreviewChunkCache;
 import org.elpatronstudio.easybuild.client.schematic.SchematicBlockLoader;
 import org.elpatronstudio.easybuild.core.model.AnchorPos;
 import org.elpatronstudio.easybuild.server.job.BlockPlacementException;
@@ -33,7 +34,10 @@ public final class SchematicPreviewController {
     }
 
     public synchronized void clearPreview() {
-        current = null;
+        if (current != null) {
+            current.close();
+            current = null;
+        }
     }
 
     public synchronized boolean hasPreview() {
@@ -55,6 +59,11 @@ public final class SchematicPreviewController {
         Objects.requireNonNull(anchor, "anchor");
 
         SchematicBlockLoader.Result result = SchematicBlockLoader.load(player, entry, anchor, includeAir);
+        if (current != null) {
+            current.close();
+        }
+
+        PreviewChunkCache chunkCache = PreviewChunkCache.fromBlocks(result.blocks());
         Preview preview = new Preview(
                 player.getUUID(),
                 entry,
@@ -63,7 +72,8 @@ public final class SchematicPreviewController {
                 result.minCorner(),
                 result.maxCorner(),
                 includeAir,
-                System.currentTimeMillis()
+                System.currentTimeMillis(),
+                chunkCache
         );
         current = preview;
         return preview;
@@ -76,7 +86,8 @@ public final class SchematicPreviewController {
                           BlockPos minCorner,
                           BlockPos maxCorner,
                           boolean includeAir,
-                          long createdAt) {
+                          long createdAt,
+                          PreviewChunkCache chunkCache) implements AutoCloseable {
 
         public int blockCount() {
             return blocks.size();
@@ -84,6 +95,11 @@ public final class SchematicPreviewController {
 
         public boolean isOwner(LocalPlayer player) {
             return player != null && owner.equals(player.getUUID());
+        }
+
+        @Override
+        public void close() {
+            chunkCache.close();
         }
     }
 }

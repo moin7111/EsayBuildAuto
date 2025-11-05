@@ -64,6 +64,9 @@ public final class SchematicBlockLoader {
         if (lowerName.endsWith(".nbt")) {
             return loadStructureFormat(player, rootTag, anchorPos, rotation, includeAir, entry.displayName());
         }
+        if (lowerName.endsWith(".litematic")) {
+            return loadLitematicFormat(player, rootTag, anchorPos, rotation, includeAir, entry.displayName());
+        }
         throw new BlockPlacementException("SCHEMATIC_FORMAT", "Nicht unterstütztes Format: " + lowerName);
     }
 
@@ -97,10 +100,6 @@ public final class SchematicBlockLoader {
         BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
         BlockPos.MutableBlockPos rotatedPos = new BlockPos.MutableBlockPos();
 
-        int localMinX = Integer.MAX_VALUE;
-        int localMinY = Integer.MAX_VALUE;
-        int localMinZ = Integer.MAX_VALUE;
-
         for (int index = 0; index < indices.length; index++) {
             BlockState state = palette.getOrDefault(indices[index], Blocks.AIR.defaultBlockState());
             int x = index % width;
@@ -112,61 +111,9 @@ public final class SchematicBlockLoader {
             mutable.set(x - offsetX, y - offsetY, z - offsetZ);
             BlockPos rotated = rotateAroundOrigin(mutable, rotation, rotatedPos);
             intermediate.add(new IntermediatePlacement(original, new BlockPos(rotated), state));
-
-            localMinX = Math.min(localMinX, rotated.getX());
-            localMinY = Math.min(localMinY, rotated.getY());
-            localMinZ = Math.min(localMinZ, rotated.getZ());
         }
 
-        BlockPos translation = new BlockPos(-localMinX, -localMinY, -localMinZ);
-        List<BlockInstance> placements = new ArrayList<>(intermediate.size());
-        BlockPos minWorld = null;
-        BlockPos maxWorld = null;
-
-        for (IntermediatePlacement placement : intermediate) {
-            BlockPos translated = placement.rotated().offset(translation);
-            BlockState rotatedState = placement.state().rotate(rotation);
-            if (!includeAir && rotatedState.isAir()) {
-                continue;
-            }
-            Item requiredItem = rotatedState.getBlock().asItem();
-            if (requiredItem == Items.AIR && !rotatedState.isAir()) {
-                LOGGER.warn("Überspringe Block {} bei {} – kein Item verfügbar", rotatedState, translated);
-                continue;
-            }
-            BlockPos worldPos = anchorPos.offset(translated);
-            CompoundTag beTag = blockEntities.getOrDefault(placement.original(), null);
-            if (beTag != null) {
-                beTag = beTag.copy();
-            }
-            placements.add(new BlockInstance(worldPos.immutable(), rotatedState, beTag, requiredItem));
-            if (minWorld == null) {
-                minWorld = worldPos;
-                maxWorld = worldPos;
-            } else {
-                minWorld = new BlockPos(Math.min(minWorld.getX(), worldPos.getX()), Math.min(minWorld.getY(), worldPos.getY()), Math.min(minWorld.getZ(), worldPos.getZ()));
-                maxWorld = new BlockPos(Math.max(maxWorld.getX(), worldPos.getX()), Math.max(maxWorld.getY(), worldPos.getY()), Math.max(maxWorld.getZ(), worldPos.getZ()));
-            }
-        }
-
-        placements.sort((a, b) -> {
-            int cmp = Integer.compare(a.position().getY(), b.position().getY());
-            if (cmp != 0) {
-                return cmp;
-            }
-            cmp = Integer.compare(a.position().getX(), b.position().getX());
-            if (cmp != 0) {
-                return cmp;
-            }
-            return Integer.compare(a.position().getZ(), b.position().getZ());
-        });
-
-        if (minWorld == null || maxWorld == null) {
-            minWorld = anchorPos;
-            maxWorld = anchorPos;
-        }
-
-        return new Result(displayName, List.copyOf(placements), minWorld, maxWorld);
+        return finalizePlacements(intermediate, blockEntities, anchorPos, rotation, includeAir, displayName);
     }
 
     private static Result loadStructureFormat(LocalPlayer player, CompoundTag root, BlockPos anchorPos,
@@ -200,10 +147,6 @@ public final class SchematicBlockLoader {
         Map<BlockPos, CompoundTag> blockEntities = new HashMap<>();
         BlockPos.MutableBlockPos rotatedBuffer = new BlockPos.MutableBlockPos();
 
-        int localMinX = Integer.MAX_VALUE;
-        int localMinY = Integer.MAX_VALUE;
-        int localMinZ = Integer.MAX_VALUE;
-
         for (int i = 0; i < blocksTag.size(); i++) {
             Tag element = blocksTag.get(i);
             Optional<CompoundTag> blockTagOptional = element.asCompound();
@@ -220,10 +163,204 @@ public final class SchematicBlockLoader {
             BlockState state = palette.get(paletteIndex);
             BlockPos rotated = rotateAroundOrigin(original, rotation, rotatedBuffer);
             intermediate.add(new IntermediatePlacement(original, new BlockPos(rotated), state));
+            blockTag.getCompound("nbt").ifPresent(nbt -> blockEntities.put(original, nbt));
+        }
+
+        return finalizePlacements(intermediate, blockEntities, anchorPos, rotation, includeAir, displayName);
+    }
+
+    private static Result loadLitematicFormat(LocalPlayer player, CompoundTag root, BlockPos anchorPos,
+                                              Rotation rotation, boolean includeAir, String displayName) throws BlockPlacementException {
+        HolderLookup<Block> blockLookup = player.level().registryAccess().lookupOrThrow(Registries.BLOCK);
+        CompoundTag regionsTag = root.getCompound("Regions")
+                .orElseThrow(() -> new BlockPlacementException("SCHEMATIC_INVALID", "Regions fehlt in der Litematic"));
+
+        List<IntermediatePlacement> intermediate = new ArrayList<>();
+        Map<BlockPos, CompoundTag> blockEntities = new HashMap<>();
+        BlockPos.MutableBlockPos rotatedBuffer = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
+
+        for (Map.Entry<String, Tag> entry : regionsTag.entrySet()) {
+            Optional<CompoundTag> regionOptional = entry.getValue().asCompound();
+            if (regionOptional.isEmpty()) {
+                continue;
+            }
+            CompoundTag regionTag = regionOptional.get();
+            BlockPos regionOrigin = readBlockPos(regionTag, "Position");
+            BlockPos regionSize = readBlockPos(regionTag, "Size");
+
+            int width = Math.abs(regionSize.getX());
+            int height = Math.abs(regionSize.getY());
+            int length = Math.abs(regionSize.getZ());
+            if (width <= 0 || height <= 0 || length <= 0) {
+                throw new BlockPlacementException("SCHEMATIC_INVALID", "Ungültige Regiongröße in " + entry.getKey());
+            }
+
+            List<BlockState> palette = readLitematicPalette(regionTag, blockLookup);
+            if (palette.isEmpty()) {
+                continue;
+            }
+
+            long[] packedStates = regionTag.getLongArray("BlockStates")
+                    .orElseThrow(() -> new BlockPlacementException("SCHEMATIC_INVALID", "BlockStates fehlen in Region " + entry.getKey()));
+            int expected = width * height * length;
+            int[] indices = unpackBlockData(packedStates, expected, palette.size());
+
+            for (int index = 0; index < indices.length; index++) {
+                BlockState state = palette.get(indices[index]);
+                int x = index % width;
+                int temp = index / width;
+                int z = temp % length;
+                int y = temp / length;
+
+                int localX = regionOrigin.getX() + x;
+                int localY = regionOrigin.getY() + y;
+                int localZ = regionOrigin.getZ() + z;
+
+                BlockPos original = new BlockPos(localX, localY, localZ);
+                mutable.set(localX, localY, localZ);
+                BlockPos rotated = rotateAroundOrigin(mutable, rotation, rotatedBuffer);
+                intermediate.add(new IntermediatePlacement(original, new BlockPos(rotated), state));
+            }
+
+            blockEntities.putAll(extractBlockEntitiesFromLitematic(regionTag, regionOrigin));
+        }
+
+        return finalizePlacements(intermediate, blockEntities, anchorPos, rotation, includeAir, displayName);
+    }
+
+    private static List<BlockState> readLitematicPalette(CompoundTag regionTag, HolderLookup<Block> lookup) throws BlockPlacementException {
+        ListTag paletteTag = regionTag.getListOrEmpty("BlockStatePalette");
+        if (paletteTag.isEmpty()) {
+            throw new BlockPlacementException("SCHEMATIC_INVALID", "Palette fehlt oder ist leer");
+        }
+        List<BlockState> palette = new ArrayList<>(paletteTag.size());
+        for (int i = 0; i < paletteTag.size(); i++) {
+            CompoundTag entry = paletteTag.getCompoundOrEmpty(i);
+            palette.add(net.minecraft.nbt.NbtUtils.readBlockState(lookup, entry));
+        }
+        return palette;
+    }
+
+    private static Map<BlockPos, CompoundTag> extractBlockEntitiesFromLitematic(CompoundTag regionTag, BlockPos regionOrigin) {
+        Map<BlockPos, CompoundTag> result = new HashMap<>();
+        for (String key : new String[]{"BlockEntities", "TileEntities"}) {
+            Optional<ListTag> listOptional = regionTag.getList(key);
+            if (listOptional.isEmpty()) {
+                continue;
+            }
+            for (Tag element : listOptional.get()) {
+                Optional<CompoundTag> tagOptional = element.asCompound();
+                if (tagOptional.isEmpty()) {
+                    continue;
+                }
+                CompoundTag entry = tagOptional.get();
+                BlockPos localPos = readLocalPos(entry);
+                if (localPos == null) {
+                    continue;
+                }
+                BlockPos absolute = localPos.offset(regionOrigin.getX(), regionOrigin.getY(), regionOrigin.getZ());
+                CompoundTag data = entry.copy();
+                data.getString("Id").ifPresent(id -> data.putString("id", id));
+                data.remove("Id");
+                data.remove("Pos");
+                result.put(absolute, data);
+            }
+            if (!result.isEmpty()) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    private static BlockPos readBlockPos(CompoundTag tag, String key) throws BlockPlacementException {
+        Optional<CompoundTag> compound = tag.getCompound(key);
+        if (compound.isPresent()) {
+            CompoundTag posTag = compound.get();
+            int x = posTag.getInt("x").orElse(Integer.MIN_VALUE);
+            int y = posTag.getInt("y").orElse(Integer.MIN_VALUE);
+            int z = posTag.getInt("z").orElse(Integer.MIN_VALUE);
+            if (x != Integer.MIN_VALUE && y != Integer.MIN_VALUE && z != Integer.MIN_VALUE) {
+                return new BlockPos(x, y, z);
+            }
+        }
+
+        ListTag list = tag.getListOrEmpty(key);
+        if (!list.isEmpty()) {
+            int x = list.getIntOr(0, Integer.MIN_VALUE);
+            int y = list.getIntOr(1, Integer.MIN_VALUE);
+            int z = list.getIntOr(2, Integer.MIN_VALUE);
+            if (x != Integer.MIN_VALUE && y != Integer.MIN_VALUE && z != Integer.MIN_VALUE) {
+                return new BlockPos(x, y, z);
+            }
+        }
+
+        Optional<int[]> array = tag.getIntArray(key);
+        if (array.isPresent()) {
+            int[] values = array.get();
+            if (values.length >= 3) {
+                return new BlockPos(values[0], values[1], values[2]);
+            }
+        }
+
+        throw new BlockPlacementException("SCHEMATIC_INVALID", "Tag '" + key + "' fehlt oder ist ungültig");
+    }
+
+    private static int[] unpackBlockData(long[] packed, int expectedEntries, int paletteSize) throws BlockPlacementException {
+        int[] indices = new int[expectedEntries];
+        if (paletteSize <= 0) {
+            return indices;
+        }
+
+        int bits = Math.max(2, Integer.SIZE - Integer.numberOfLeadingZeros(Math.max(1, paletteSize) - 1));
+        int mask = (1 << bits) - 1;
+        int bitIndex = 0;
+
+        for (int entry = 0; entry < expectedEntries; entry++) {
+            int longIndex = bitIndex >> 6;
+            if (longIndex >= packed.length) {
+                throw new BlockPlacementException("SCHEMATIC_INVALID", "BlockData ist kürzer als erwartet");
+            }
+
+            int bitOffset = bitIndex & 63;
+            int endBit = bitOffset + bits;
+            long base = packed[longIndex] >>> bitOffset;
+
+            if (endBit > 64) {
+                int overflowBits = endBit - 64;
+                if (longIndex + 1 >= packed.length) {
+                    throw new BlockPlacementException("SCHEMATIC_INVALID", "BlockData ist kürzer als erwartet");
+                }
+                long next = packed[longIndex + 1] & ((1L << overflowBits) - 1);
+                base |= next << (bits - overflowBits);
+            }
+
+            indices[entry] = (int) (base & mask);
+            bitIndex += bits;
+        }
+
+        return indices;
+    }
+
+    private static Result finalizePlacements(List<IntermediatePlacement> intermediate,
+                                             Map<BlockPos, CompoundTag> blockEntities,
+                                             BlockPos anchorPos,
+                                             Rotation rotation,
+                                             boolean includeAir,
+                                             String displayName) {
+        if (intermediate.isEmpty()) {
+            return new Result(displayName, List.of(), anchorPos, anchorPos);
+        }
+
+        int localMinX = Integer.MAX_VALUE;
+        int localMinY = Integer.MAX_VALUE;
+        int localMinZ = Integer.MAX_VALUE;
+
+        for (IntermediatePlacement placement : intermediate) {
+            BlockPos rotated = placement.rotated();
             localMinX = Math.min(localMinX, rotated.getX());
             localMinY = Math.min(localMinY, rotated.getY());
             localMinZ = Math.min(localMinZ, rotated.getZ());
-            blockTag.getCompound("nbt").ifPresent(nbt -> blockEntities.put(original, nbt));
         }
 
         BlockPos translation = new BlockPos(-localMinX, -localMinY, -localMinZ);
@@ -243,11 +380,11 @@ public final class SchematicBlockLoader {
                 continue;
             }
             BlockPos worldPos = anchorPos.offset(translated);
-            CompoundTag blockEntityTag = blockEntities.get(placement.original());
-            if (blockEntityTag != null) {
-                blockEntityTag = blockEntityTag.copy();
+            CompoundTag beTag = blockEntities.get(placement.original());
+            if (beTag != null) {
+                beTag = beTag.copy();
             }
-            placements.add(new BlockInstance(worldPos.immutable(), rotatedState, blockEntityTag, requiredItem));
+            placements.add(new BlockInstance(worldPos.immutable(), rotatedState, beTag, requiredItem));
             if (minWorld == null) {
                 minWorld = worldPos;
                 maxWorld = worldPos;
@@ -337,27 +474,7 @@ public final class SchematicBlockLoader {
 
         Optional<long[]> packedData = root.getLongArray("BlockData");
         if (packedData.isPresent()) {
-            int bits = Math.max(2, Integer.SIZE - Integer.numberOfLeadingZeros(Math.max(1, paletteSize) - 1));
-            int mask = (1 << bits) - 1;
-            long[] packed = packedData.get();
-            int[] indices = new int[expectedEntries];
-            int entry = 0;
-            int longIndex = 0;
-            int bitOffset = 0;
-            while (entry < expectedEntries) {
-                if (longIndex >= packed.length) {
-                    throw new BlockPlacementException("SCHEMATIC_INVALID", "BlockData ist kürzer als erwartet");
-                }
-                long data = packed[longIndex];
-                indices[entry] = (int) ((data >> bitOffset) & mask);
-                bitOffset += bits;
-                if (bitOffset >= 64) {
-                    longIndex++;
-                    bitOffset = 0;
-                }
-                entry++;
-            }
-            return indices;
+            return unpackBlockData(packedData.get(), expectedEntries, paletteSize);
         }
 
         throw new BlockPlacementException("SCHEMATIC_INVALID", "BlockData fehlt oder hat ein unbekanntes Format");

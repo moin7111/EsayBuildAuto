@@ -128,6 +128,7 @@ public final class SchematicPreviewRenderer {
         Matrix4fStack modelView = RenderSystem.getModelViewStack();
         modelView.pushMatrix();
         modelView.mul(transform);
+        RenderSystem.applyModelViewMatrix();
 
         for (PreviewTint tint : PreviewTint.values()) {
             PreviewChunkMesh mesh = chunk.mesh(tint);
@@ -143,6 +144,7 @@ public final class SchematicPreviewRenderer {
         }
 
         modelView.popMatrix();
+        RenderSystem.applyModelViewMatrix();
         poseStack.popPose();
     }
 }

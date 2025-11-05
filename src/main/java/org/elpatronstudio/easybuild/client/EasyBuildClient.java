@@ -17,8 +17,10 @@ import org.elpatronstudio.easybuild.client.ClientChestRegistry;
 import org.elpatronstudio.easybuild.client.ClientHandshakeState;
 import org.elpatronstudio.easybuild.client.autobuild.ClientPlacementController;
 import org.elpatronstudio.easybuild.client.gui.SchematicBuilderScreen;
+import org.elpatronstudio.easybuild.client.preview.SchematicPreviewController;
 import org.elpatronstudio.easybuild.client.render.ChestSelectionRenderer;
 import org.elpatronstudio.easybuild.client.render.PreviewAnchorRenderer;
+import org.elpatronstudio.easybuild.client.render.SchematicPreviewRenderer;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundHelloHandshake;
@@ -65,6 +67,7 @@ public final class EasyBuildClient {
         NeoForge.EVENT_BUS.register(EasyBuildClient.class);
         ChestSelectionRenderer.init();
         PreviewAnchorRenderer.init();
+        SchematicPreviewRenderer.init();
     }
 
     private static void onClientSetup(final FMLClientSetupEvent event) {
@@ -189,6 +192,7 @@ public final class EasyBuildClient {
     public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
         ClientHandshakeState.get().clear();
         EasyBuildClientState.get().reset();
+        SchematicPreviewController.get().clearPreview();
         handshakeSent = false;
     }
 

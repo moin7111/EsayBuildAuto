@@ -2,19 +2,22 @@ package org.elpatronstudio.easybuild.client.gui;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Container;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.network.chat.Component;
 import org.elpatronstudio.easybuild.client.ClientChestRegistry;
 import org.elpatronstudio.easybuild.client.autobuild.ClientPlacementController;
 import org.elpatronstudio.easybuild.client.model.SchematicFileEntry;
+import org.elpatronstudio.easybuild.client.preview.SchematicPreviewController;
+import org.elpatronstudio.easybuild.client.preview.SchematicPreviewController.Preview;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState.PendingBuildRequest;
 import org.elpatronstudio.easybuild.core.model.AnchorPos;
@@ -25,6 +28,7 @@ import org.elpatronstudio.easybuild.core.network.packet.ServerboundMaterialCheck
 import org.elpatronstudio.easybuild.core.network.packet.ServerboundRequestBuild;
 import org.elpatronstudio.easybuild.server.job.BlockPlacementException;
 import org.elpatronstudio.esaybuildauto.Config;
+import org.slf4j.Logger;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -38,6 +42,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * Collection of GUI-triggered client actions.
  */
 public final class EasyBuildGuiActions {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private EasyBuildGuiActions() {
     }
@@ -79,11 +85,28 @@ public final class EasyBuildGuiActions {
     }
 
     private static void startPreview(LocalPlayer player, SchematicFileEntry schematic) {
-        player.displayClientMessage(Component.translatable("easybuild.preview.start", schematic.displayName()), false);
-        // A dedicated preview controller will be wired in during the positioning task.
+        AnchorPos anchor = resolveAnchor(player);
+        SchematicPreviewController controller = SchematicPreviewController.get();
+
+        if (controller.matchesCurrent(player.getUUID(), schematic, anchor)) {
+            controller.clearPreview();
+            player.displayClientMessage(Component.translatable("easybuild.preview.stop"), false);
+            return;
+        }
+
+        boolean includeAir = Config.clientPlaceAir;
+        try {
+            Preview preview = controller.startPreview(player, schematic, anchor, includeAir);
+            player.displayClientMessage(Component.translatable("easybuild.preview.start", preview.blockCount(), schematic.displayName()), false);
+        } catch (BlockPlacementException ex) {
+            controller.clearPreview();
+            LOGGER.warn("Failed to prepare preview for {}: {}", schematic.id(), ex.getMessage());
+            player.displayClientMessage(Component.translatable("easybuild.preview.error", ex.getMessage()), true);
+        }
     }
 
     private static void startClientAutoBuild(LocalPlayer player, SchematicFileEntry schematic) {
+        SchematicPreviewController.get().clearPreview();
         if (!Config.clientAutoBuildEnabled) {
             player.displayClientMessage(Component.translatable("easybuild.autobuild.disabled"), true);
             return;
@@ -106,6 +129,7 @@ public final class EasyBuildGuiActions {
     }
 
     private static void startServerBuild(Minecraft minecraft, LocalPlayer player, SchematicFileEntry schematic) {
+        SchematicPreviewController.get().clearPreview();
         ClientPacketListener connection = minecraft.getConnection();
         if (connection == null) {
             return;

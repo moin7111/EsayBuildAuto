@@ -1,5 +1,6 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -10,8 +11,12 @@ import org.elpatronstudio.easybuild.core.model.JobPhase;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
+import org.slf4j.Logger;
 
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Server → Client message describing the state of an outstanding build job.
@@ -31,6 +36,10 @@ public record ClientboundProgressUpdate(
     public static final Type<ClientboundProgressUpdate> TYPE = new Type<>(ID);
     public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundProgressUpdate> STREAM_CODEC =
         StreamCodec.of(ClientboundProgressUpdate::write, ClientboundProgressUpdate::read);
+
+    private static final Logger LOGGER = LogUtils.getLogger();
+    private static final Map<String, JobPhase> LAST_LOG_PHASE = new ConcurrentHashMap<>();
+    private static final Map<String, Integer> LAST_LOG_BUCKET = new ConcurrentHashMap<>();
 
     public ClientboundProgressUpdate {
         Objects.requireNonNull(jobId, "jobId");
@@ -72,8 +81,53 @@ public record ClientboundProgressUpdate(
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
         EasyBuildClientState.get().recordProgressUpdate(this);
+        logProgress();
         if (minecraft.player != null && !message.isBlank()) {
             minecraft.player.displayClientMessage(Component.literal("[EasyBuild] " + message), true);
         }
+    }
+
+    private void logProgress() {
+        int bucket = computeProgressBucket();
+        JobPhase previousPhase = LAST_LOG_PHASE.get(jobId);
+        Integer previousBucket = LAST_LOG_BUCKET.get(jobId);
+
+        boolean shouldLog = previousPhase == null || previousPhase != phase;
+        if (!shouldLog && bucket >= 0 && phase == JobPhase.PLACING) {
+            shouldLog = previousBucket == null || previousBucket != bucket;
+        }
+        if (phase == JobPhase.COMPLETED || phase == JobPhase.CANCELLED) {
+            shouldLog = true;
+        }
+
+        if (!shouldLog) {
+            return;
+        }
+
+        LAST_LOG_PHASE.put(jobId, phase);
+        if (bucket >= 0) {
+            LAST_LOG_BUCKET.put(jobId, bucket);
+        } else if (phase == JobPhase.COMPLETED || phase == JobPhase.CANCELLED) {
+            LAST_LOG_BUCKET.remove(jobId);
+        }
+
+        LOGGER.info("[EasyBuild] Job {} [{}] {}", jobId, phase, buildLogSummary());
+    }
+
+    private int computeProgressBucket() {
+        if (total <= 0) {
+            return -1;
+        }
+        double ratio = (double) placed / Math.max(1, total);
+        return (int) Math.floor(ratio * 10.0);
+    }
+
+    private String buildLogSummary() {
+        String summary = message.isBlank() ? placed + " / " + total : message;
+        if (phase == JobPhase.PLACING && total > 0) {
+            double percent = (double) placed / Math.max(1, total) * 100.0;
+            summary = summary + String.format(Locale.ROOT, " (%.0f%%)", percent);
+        }
+        return summary;
     }
 }

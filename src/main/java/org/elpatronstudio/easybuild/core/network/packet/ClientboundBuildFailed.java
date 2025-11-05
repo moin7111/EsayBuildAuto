@@ -1,5 +1,6 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -9,6 +10,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
+import org.slf4j.Logger;
 
 import java.util.Objects;
 
@@ -30,6 +32,8 @@ public record ClientboundBuildFailed(
     public static final Type<ClientboundBuildFailed> TYPE = new Type<>(ID);
     public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundBuildFailed> STREAM_CODEC =
             StreamCodec.of(ClientboundBuildFailed::write, ClientboundBuildFailed::read);
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     public ClientboundBuildFailed {
         Objects.requireNonNull(jobId, "jobId");
@@ -72,6 +76,7 @@ public record ClientboundBuildFailed(
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
         EasyBuildClientState.get().recordBuildFailed(this);
+        LOGGER.warn("[EasyBuild] Job {} failed ({}): {}", jobId, reasonCode, details.isBlank() ? "n/a" : details);
         if (minecraft.player != null) {
             minecraft.player.displayClientMessage(Component.translatable("easybuild.job.failed", jobId, reasonCode, details), true);
         }

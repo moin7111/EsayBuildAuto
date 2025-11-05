@@ -280,18 +280,45 @@ public final class EasyBuildClientState {
     }
 
     public synchronized void recordProgressUpdate(ClientboundProgressUpdate message) {
-        ClientBuildJob job = buildJobs.computeIfAbsent(message.jobId(), id ->
-                new ClientBuildJob(id, message.schematic(), message.schematic().schematicId(), BuildMode.INSTA, PasteMode.ATOMIC, id, true));
+        ClientBuildJob job = buildJobs.get(message.jobId());
+        if (job == null) {
+            job = new ClientBuildJob(
+                    message.jobId(),
+                    message.schematic(),
+                    message.schematic().schematicId(),
+                    BuildMode.INSTA,
+                    PasteMode.ATOMIC,
+                    message.jobId(),
+                    true
+            );
+            buildJobs.put(message.jobId(), job);
+            trimJobHistory();
+        }
+
         job.updateProgress(message.placed(), message.total(), message.phase(), message.message());
         job.setLastUpdate(System.currentTimeMillis());
+        reorderJob(job.jobId(), job);
     }
 
     public synchronized void recordBuildCompleted(ClientboundBuildCompleted message) {
-        ClientBuildJob job = buildJobs.computeIfAbsent(message.jobId(), id ->
-                new ClientBuildJob(id, message.schematic(), message.schematic().schematicId(), BuildMode.INSTA, PasteMode.ATOMIC, id, true));
+        ClientBuildJob job = buildJobs.get(message.jobId());
+        if (job == null) {
+            job = new ClientBuildJob(
+                    message.jobId(),
+                    message.schematic(),
+                    message.schematic().schematicId(),
+                    BuildMode.INSTA,
+                    PasteMode.ATOMIC,
+                    message.jobId(),
+                    true
+            );
+            buildJobs.put(message.jobId(), job);
+            trimJobHistory();
+        }
         job.complete(message.success(), message.consumed());
         job.setLastMessage(message.success() ? "Completed" : "Completed with issues");
         job.setLastUpdate(System.currentTimeMillis());
+        reorderJob(job.jobId(), job);
     }
 
     public synchronized void recordBuildFailed(ClientboundBuildFailed message) {
@@ -307,6 +334,7 @@ public final class EasyBuildClientState {
         }
         job.fail(message.reasonCode(), message.details(), message.rollbackPerformed());
         job.setLastUpdate(System.currentTimeMillis());
+        reorderJob(job.jobId(), job);
     }
 
     public synchronized List<ClientBuildJob> jobs() {
@@ -315,6 +343,46 @@ public final class EasyBuildClientState {
 
     public synchronized Optional<ClientBuildJob> job(String jobId) {
         return Optional.ofNullable(buildJobs.get(jobId));
+    }
+
+    public synchronized Optional<ClientBuildJob> latestJob() {
+        if (buildJobs.isEmpty()) {
+            return Optional.empty();
+        }
+        List<ClientBuildJob> ordered = new ArrayList<>(buildJobs.values());
+        return Optional.of(ordered.get(ordered.size() - 1));
+    }
+
+    public synchronized List<ClientBuildJob> recentJobs(int limit) {
+        if (limit <= 0 || buildJobs.isEmpty()) {
+            return List.of();
+        }
+        List<ClientBuildJob> ordered = new ArrayList<>(buildJobs.values());
+        Collections.reverse(ordered);
+        if (ordered.size() > limit) {
+            ordered = ordered.subList(0, limit);
+        }
+        return List.copyOf(ordered);
+    }
+
+    public synchronized Optional<ClientBuildJob> activeJob() {
+        if (buildJobs.isEmpty()) {
+            return Optional.empty();
+        }
+        long now = System.currentTimeMillis();
+        for (ClientBuildJob job : recentJobs(buildJobs.size())) {
+            if (!job.completed() && job.phase() != JobPhase.CANCELLED) {
+                if (now - job.lastUpdate() <= 15000L) {
+                    return Optional.of(job);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private void reorderJob(String jobId, ClientBuildJob job) {
+        buildJobs.remove(jobId);
+        buildJobs.put(jobId, job);
     }
 
     private void trimJobHistory() {

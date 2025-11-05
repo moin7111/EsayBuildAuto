@@ -1,5 +1,6 @@
 package org.elpatronstudio.easybuild.core.network.packet;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -10,6 +11,7 @@ import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
 import org.elpatronstudio.easybuild.core.model.SchematicRef;
 import org.elpatronstudio.easybuild.core.network.EasyBuildNetwork;
+import org.slf4j.Logger;
 
 import java.util.List;
 import java.util.Objects;
@@ -31,6 +33,8 @@ public record ClientboundBuildCompleted(
     public static final Type<ClientboundBuildCompleted> TYPE = new Type<>(ID);
     public static final StreamCodec<RegistryFriendlyByteBuf, ClientboundBuildCompleted> STREAM_CODEC =
             StreamCodec.of(ClientboundBuildCompleted::write, ClientboundBuildCompleted::read);
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     public ClientboundBuildCompleted {
         Objects.requireNonNull(jobId, "jobId");
@@ -70,6 +74,7 @@ public record ClientboundBuildCompleted(
     public void handleClient() {
         Minecraft minecraft = Minecraft.getInstance();
         EasyBuildClientState.get().recordBuildCompleted(this);
+        LOGGER.info("[EasyBuild] Job {} completed {}", jobId, success ? "successfully" : "with issues");
         if (minecraft.player != null) {
             Component message = success
                     ? Component.translatable("easybuild.job.completed", jobId, schematic.schematicId())

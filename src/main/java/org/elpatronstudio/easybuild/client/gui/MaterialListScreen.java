@@ -15,6 +15,7 @@ import net.minecraft.client.gui.Font;
 import org.elpatronstudio.easybuild.client.model.SchematicFileEntry;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.model.MaterialStack;
+import org.elpatronstudio.easybuild.core.model.BuildMode;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -44,7 +45,7 @@ public class MaterialListScreen extends Screen {
 
     @Override
     protected void init() {
-        int listWidth = Math.min(this.width - 40, 340);
+        int listWidth = Math.max(140, Math.min(this.width - 40, 340));
         int left = (this.width - listWidth) / 2;
 
         this.searchBox = new EditBox(this.font, left, 68, listWidth, 18, Component.translatable("easybuild.gui.materials.search"));
@@ -57,17 +58,22 @@ public class MaterialListScreen extends Screen {
         this.addRenderableWidget(this.searchBox);
 
         int listTop = this.searchBox.getY() + this.searchBox.getHeight() + 6;
-        int listHeight = this.height - listTop - 90;
+        int listHeight = Math.max(48, this.height - listTop - 90);
         this.listWidget = new MaterialListWidget(this.minecraft, listWidth, listHeight, listTop, 18);
         this.listWidget.updateSizeAndPosition(listWidth, listHeight, left, listTop);
         this.addRenderableWidget(listWidget);
 
         int buttonWidth = 100;
+        int buttonY = this.height - 40;
         this.addRenderableWidget(Button.builder(Component.translatable("gui.back"), button -> onClose())
-                .bounds(left, this.height - 40, buttonWidth, 20)
+                .bounds(left, buttonY, buttonWidth, 20)
+                .build());
+        int loadX = left + (listWidth - buttonWidth) / 2;
+        this.addRenderableWidget(Button.builder(Component.translatable("easybuild.gui.materials.load"), button -> onLoad())
+                .bounds(loadX, buttonY, buttonWidth, 20)
                 .build());
         this.addRenderableWidget(Button.builder(Component.translatable("easybuild.gui.materials.refresh"), button -> EasyBuildGuiActions.requestMaterialCheck(minecraft, schematic))
-                .bounds(left + listWidth - buttonWidth, this.height - 40, buttonWidth, 20)
+                .bounds(left + listWidth - buttonWidth, buttonY, buttonWidth, 20)
                 .build());
 
         EasyBuildGuiActions.requestMaterialCheck(minecraft, schematic);
@@ -81,6 +87,9 @@ public class MaterialListScreen extends Screen {
     }
 
     private void refreshStatus() {
+        if (listWidget == null) {
+            return;
+        }
         Optional<EasyBuildClientState.MaterialStatus> statusOpt = EasyBuildClientState.get().materialStatus(schematic.ref());
         EasyBuildClientState.MaterialStatus status = statusOpt.orElse(null);
         long timestamp = status != null ? status.updatedAtMillis() : -1L;
@@ -152,6 +161,13 @@ public class MaterialListScreen extends Screen {
         if (this.minecraft != null) {
             this.minecraft.setScreen(parent);
         }
+    }
+
+    private void onLoad() {
+        if (this.minecraft == null) {
+            return;
+        }
+        EasyBuildGuiActions.handleStart(this.minecraft, schematic, BuildMode.SELF);
     }
 
     private static final class MaterialListWidget extends ObjectSelectionList<MaterialEntry> {

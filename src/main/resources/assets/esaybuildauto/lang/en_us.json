@@ -36,6 +36,7 @@
   "easybuild.gui.detail.material_status.missing": "Materials: Missing – %s type(s) / %s items",
   "easybuild.gui.materials.title": "Material Requirements",
   "easybuild.gui.materials.refresh": "Refresh",
+  "easybuild.gui.materials.load": "Load Preview",
   "easybuild.gui.materials.header": "Materials for %s",
   "easybuild.gui.materials.pending": "Waiting for server response…",
   "easybuild.gui.materials.status.wait": "Pending material analysis…",

@@ -2,6 +2,8 @@ package org.elpatronstudio.easybuild.client;
 
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.resources.ResourceLocation;
@@ -12,6 +14,7 @@ import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.InputEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.elpatronstudio.easybuild.client.ClientChestRegistry;
 import org.elpatronstudio.easybuild.client.ClientHandshakeState;
@@ -33,9 +36,11 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.elpatronstudio.easybuild.core.model.ChestRef;
+import org.elpatronstudio.easybuild.core.model.JobPhase;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -194,11 +199,92 @@ public final class EasyBuildClient {
 
 
     @SubscribeEvent
+    public static void onRenderGui(RenderGuiEvent.Post event) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null || minecraft.screen != null || minecraft.options.hideGui) {
+            return;
+        }
+
+        EasyBuildClientState state = EasyBuildClientState.get();
+        long now = System.currentTimeMillis();
+
+        Optional<EasyBuildClientState.ClientBuildJob> jobOpt = state.activeJob();
+        if (jobOpt.isEmpty()) {
+            jobOpt = state.latestJob().filter(job -> now - job.lastUpdate() <= 5000L);
+        }
+
+        if (jobOpt.isEmpty()) {
+            return;
+        }
+
+        EasyBuildClientState.ClientBuildJob job = jobOpt.get();
+        if (now - job.lastUpdate() > 5000L) {
+            return;
+        }
+
+        GuiGraphics guiGraphics = event.getGuiGraphics();
+        Font font = minecraft.font;
+        int width = event.getWindow().getGuiScaledWidth();
+        int height = event.getWindow().getGuiScaledHeight();
+        int baseY = height - 60;
+
+        Component header = Component.literal("EasyBuild – " + job.displayName());
+        Component detail = Component.literal(buildHudDetail(job));
+
+        guiGraphics.drawCenteredString(font, header, width / 2, baseY, 0xFFFFFF, false);
+        guiGraphics.drawCenteredString(font, detail, width / 2, baseY + 12, hudColor(job), false);
+    }
+
+
+    @SubscribeEvent
     public static void onClientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
         ClientHandshakeState.get().clear();
         EasyBuildClientState.get().reset();
         SchematicPreviewController.get().clearPreview();
         handshakeSent = false;
+    }
+
+    private static String buildHudDetail(EasyBuildClientState.ClientBuildJob job) {
+        String message = job.lastMessage();
+        if (message.isBlank() && job.total() > 0) {
+            message = job.placed() + " / " + job.total();
+        }
+
+        StringBuilder builder = new StringBuilder();
+        builder.append(phaseLabel(job.phase()));
+        if (!message.isBlank()) {
+            builder.append(" – ").append(message);
+        }
+
+        if (job.total() > 0) {
+            double percent = (double) job.placed() / Math.max(1, job.total()) * 100.0;
+            builder.append(" (").append(Math.round(percent)).append("%)");
+        }
+
+        return builder.toString();
+    }
+
+    private static int hudColor(EasyBuildClientState.ClientBuildJob job) {
+        return switch (job.phase()) {
+            case COMPLETED -> 0x55FF55;
+            case CANCELLED -> 0xFF5555;
+            case ROLLING_BACK -> 0xFFAA55;
+            case PLACING -> 0x66CCFF;
+            case RESERVING, QUEUED -> 0xFFFFAA;
+            case PAUSED -> 0xFFD37F;
+        };
+    }
+
+    private static String phaseLabel(JobPhase phase) {
+        return switch (phase) {
+            case QUEUED -> "Queued";
+            case RESERVING -> "Reserving";
+            case PLACING -> "Placing";
+            case PAUSED -> "Paused";
+            case ROLLING_BACK -> "Rolling Back";
+            case COMPLETED -> "Completed";
+            case CANCELLED -> "Cancelled";
+        };
     }
 
     private static void ensureHandshake() {

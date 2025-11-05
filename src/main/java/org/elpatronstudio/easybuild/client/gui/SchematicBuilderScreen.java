@@ -17,6 +17,7 @@ import org.elpatronstudio.easybuild.client.model.SchematicFileEntry;
 import org.elpatronstudio.easybuild.client.schematic.SchematicRepository;
 import org.elpatronstudio.easybuild.client.state.EasyBuildClientState;
 import org.elpatronstudio.easybuild.core.model.BuildMode;
+import org.elpatronstudio.easybuild.core.model.JobPhase;
 
 import java.nio.file.Path;
 import java.text.DateFormat;
@@ -55,6 +56,8 @@ public class SchematicBuilderScreen extends Screen {
     private Button chestButton;
     private Button materialsButton;
     private Button reloadButton;
+    private int rightPaneLeft;
+    private int buttonColumnWidth;
 
     public SchematicBuilderScreen() {
         super(TITLE);
@@ -79,41 +82,41 @@ public class SchematicBuilderScreen extends Screen {
         refreshSelectionList();
         this.addRenderableWidget(selectionList);
 
-        int rightPaneLeft = listLeft + listWidth + 24;
-        int buttonWidth = 160;
+        this.rightPaneLeft = listLeft + listWidth + 24;
+        this.buttonColumnWidth = 160;
 
         this.modeButton = CycleButton.builder(BuildMode::title)
                 .withValues(BuildMode.values())
                 .withInitialValue(state.buildMode())
                 .displayOnlyValue()
-                .create(rightPaneLeft, listTop, buttonWidth, 20, MODE_LABEL, (button, value) -> {
+                .create(rightPaneLeft, listTop, buttonColumnWidth, 20, MODE_LABEL, (button, value) -> {
                     state.setBuildMode(value);
                     updateButtonStates();
                 });
         this.addRenderableWidget(modeButton);
 
         this.chestButton = Button.builder(CHEST_BUTTON, button -> onSelectChests())
-                .bounds(rightPaneLeft, listTop + 28, buttonWidth, 20)
+                .bounds(rightPaneLeft, listTop + 28, buttonColumnWidth, 20)
                 .build();
         this.addRenderableWidget(chestButton);
 
         this.materialsButton = Button.builder(MATERIALS_BUTTON, button -> onOpenMaterials())
-                .bounds(rightPaneLeft, listTop + 56, buttonWidth, 20)
+                .bounds(rightPaneLeft, listTop + 56, buttonColumnWidth, 20)
                 .build();
         this.addRenderableWidget(materialsButton);
 
         this.reloadButton = Button.builder(RELOAD_BUTTON, button -> reloadSchematics())
-                .bounds(rightPaneLeft, listTop + 84, buttonWidth, 20)
+                .bounds(rightPaneLeft, listTop + 84, buttonColumnWidth, 20)
                 .build();
         this.addRenderableWidget(reloadButton);
 
         this.startButton = Button.builder(START_BUTTON, button -> onStart())
-                .bounds(rightPaneLeft, listBottom - 44, buttonWidth, 20)
+                .bounds(rightPaneLeft, listBottom - 44, buttonColumnWidth, 20)
                 .build();
         this.addRenderableWidget(startButton);
 
         this.addRenderableWidget(Button.builder(CLOSE_BUTTON, button -> onClose())
-                .bounds(rightPaneLeft, listBottom - 20, buttonWidth, 20)
+                .bounds(rightPaneLeft, listBottom - 20, buttonColumnWidth, 20)
                 .build());
 
         updateButtonStates();
@@ -165,6 +168,8 @@ public class SchematicBuilderScreen extends Screen {
             int width = font.width(tip);
             guiGraphics.drawString(font, tip, (this.width - width) / 2, this.height - 28, 0xFFFF55, false);
         }
+
+        renderJobStatus(guiGraphics);
     }
 
     private void renderDetails(GuiGraphics guiGraphics, SchematicFileEntry entry) {
@@ -224,6 +229,91 @@ public class SchematicBuilderScreen extends Screen {
             }
         }
         guiGraphics.drawString(font, line, left, top, color, false);
+    }
+
+    private void renderJobStatus(GuiGraphics guiGraphics) {
+        List<EasyBuildClientState.ClientBuildJob> jobs = state.recentJobs(3);
+        if (jobs.isEmpty()) {
+            return;
+        }
+
+        Font font = this.font;
+        int headerY = (startButton != null ? startButton.getY() : this.height - 40) - (jobs.size() + 1) * 12 - 8;
+        int minimumY = this.selectionList.getY() + 150;
+        if (headerY < minimumY) {
+            headerY = minimumY;
+        }
+
+        guiGraphics.drawString(font, Component.translatable("easybuild.gui.jobs.recent"), rightPaneLeft, headerY, 0xFFFFFF, false);
+
+        long now = System.currentTimeMillis();
+        int y = headerY + 12;
+        for (EasyBuildClientState.ClientBuildJob job : jobs) {
+            Component line = Component.literal(trimToColumn(buildJobStatusLine(job, now)));
+            guiGraphics.drawString(font, line, rightPaneLeft, y, jobStatusColor(job), false);
+            y += 12;
+        }
+    }
+
+    private String buildJobStatusLine(EasyBuildClientState.ClientBuildJob job, long now) {
+        StringBuilder builder = new StringBuilder();
+        if (!job.completed() && job.phase() != JobPhase.CANCELLED) {
+            builder.append("> ");
+        }
+        builder.append(job.displayName());
+        builder.append(" – ").append(phaseLabel(job.phase()));
+
+        String message = job.lastMessage();
+        if (message.isBlank() && job.total() > 0) {
+            message = job.placed() + " / " + job.total();
+        }
+
+        if (!message.isBlank()) {
+            builder.append(": ").append(message);
+        }
+
+        if (job.total() > 0) {
+            double percent = (double) job.placed() / Math.max(1, job.total()) * 100.0;
+            builder.append(" (").append(Math.round(percent)).append("%)");
+        }
+
+        long ageMillis = now - job.lastUpdate();
+        if (ageMillis >= 1000L) {
+            long seconds = Math.max(1L, ageMillis / 1000L);
+            builder.append(" • ").append(seconds).append("s ago");
+        }
+
+        return builder.toString();
+    }
+
+    private int jobStatusColor(EasyBuildClientState.ClientBuildJob job) {
+        return switch (job.phase()) {
+            case COMPLETED -> 0x55FF55;
+            case CANCELLED -> 0xFF5555;
+            case ROLLING_BACK -> 0xFFAA55;
+            case PLACING -> 0x66CCFF;
+            case RESERVING, QUEUED -> 0xFFFFAA;
+            case PAUSED -> 0xFFD37F;
+        };
+    }
+
+    private String phaseLabel(JobPhase phase) {
+        return switch (phase) {
+            case QUEUED -> "Queued";
+            case RESERVING -> "Reserving";
+            case PLACING -> "Placing";
+            case PAUSED -> "Paused";
+            case ROLLING_BACK -> "Rolling Back";
+            case COMPLETED -> "Completed";
+            case CANCELLED -> "Cancelled";
+        };
+    }
+
+    private String trimToColumn(String text) {
+        if (this.font.width(text) <= buttonColumnWidth) {
+            return text;
+        }
+        return this.font.plainSubstrByWidth(text + "...", buttonColumnWidth);
     }
 
     private void loadSchematics() {
